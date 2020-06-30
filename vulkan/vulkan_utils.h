@@ -16,7 +16,7 @@ struct vk_gpu_linear_arena
 {
     u64 Size;
     u64 Used;
-    vk_gpu_ptr MemPtr;
+    VkDeviceMemory Memory;
 };
 
 struct vk_gpu_temp_mem

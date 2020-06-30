@@ -73,11 +73,11 @@ inline u64 VkAlignAddress(u64 Address, u64 Alignment)
     return Result;
 }
 
-inline vk_gpu_linear_arena VkInitGpuLinearArena(vk_gpu_ptr MemPtr, u64 Size)
+inline vk_gpu_linear_arena VkGpuLinearArenaCreate(VkDeviceMemory Memory, u64 Size)
 {
     vk_gpu_linear_arena Result = {};
     Result.Size = Size;
-    Result.MemPtr = MemPtr;
+    Result.Memory = Memory;
 
     return Result;
 }
@@ -91,7 +91,7 @@ inline vk_gpu_ptr VkPushSize(vk_gpu_linear_arena* Arena, u64 Size, u64 Alignment
     Assert(AlignedOffset + Size <= Arena->Size);
     
     vk_gpu_ptr Result = {};
-    Result.Memory = Arena->MemPtr.Memory;
+    Result.Memory = &Arena->Memory;
     Result.Offset = AlignedOffset;
 
     Arena->Used = AlignedOffset + Size;
@@ -113,6 +113,27 @@ inline vk_gpu_temp_mem VkBeginTempMem(vk_gpu_linear_arena* Arena)
 inline void VkEndTempMem(vk_gpu_temp_mem TempMem)
 {
     TempMem.Arena->Used = TempMem.Used;
+}
+
+inline i32 VkGetMemoryType(VkPhysicalDeviceMemoryProperties* MemoryProperties, u32 RequiredType, VkMemoryPropertyFlags RequiredProperties)
+{
+    i32 Result = -1;
+    
+    u32 MemoryCount = MemoryProperties->memoryTypeCount;
+    for (u32 MemoryIndex = 0; MemoryIndex < MemoryCount; ++MemoryIndex)
+    {
+        // TODO: Do we need this type bit thing here or can we remove?
+        u32 MemoryTypeBits = 1 << MemoryIndex;
+        VkMemoryPropertyFlags Properties = MemoryProperties->memoryTypes[MemoryIndex].propertyFlags;
+
+        if ((RequiredType & MemoryTypeBits) && (Properties & RequiredProperties) == RequiredProperties)
+        {
+            Result = MemoryIndex;
+            break;
+        }
+    }
+
+    return Result;
 }
 
 inline VkDeviceMemory VkMemoryAllocate(VkDevice Device, u32 Type, u64 Size)
@@ -581,7 +602,7 @@ inline void VkDescUpdaterFlush(VkDevice Device, vk_desc_updater* Updater)
 
 inline vk_transfer_updater VkTransferUpdaterCreate(VkDevice Device, u32 StagingTypeId, linear_arena* CpuArena,
                                                    vk_gpu_linear_arena* GpuArena, u32 FlushAlignment, u64 StagingSize,
-                                                   u32 MaxNumBufferTransfers, u32 MaxNumImageTransfers, u32 MaxNumBufferUpdates)
+                                                   u32 MaxNumBufferTransfers, u32 MaxNumImageTransfers)
 {
     vk_transfer_updater Result = {};
 
@@ -623,9 +644,9 @@ inline vk_transfer_updater VkTransferUpdaterCreate(VkDevice Device, u32 StagingT
 }
 
 #define VkTransferPushBufferWriteStruct(Updater, Buffer, Type, Alignment, InputMask, OutputMask) \
-    (Type*)VkPushBufferToGpu(Updater, Buffer, sizeof(Type), Alignment, InputMask, OutputMask)
+    (Type*)VkTransferPushBufferWrite(Updater, Buffer, sizeof(Type), Alignment, InputMask, OutputMask)
 #define VkTransferPushBufferWriteArray(Updater, Buffer, Type, Count, Alignment, InputMask, OutputMask) \
-    (Type*)VkPushBufferToGpu(Updater, Buffer, sizeof(Type)*Count, Alignment, InputMask, OutputMask)
+    (Type*)VkTransferPushBufferWrite(Updater, Buffer, sizeof(Type)*Count, Alignment, InputMask, OutputMask)
 inline u8* VkTransferPushBufferWrite(vk_transfer_updater* Updater, VkBuffer Buffer, u32 BufferSize, mm Alignment,
                                      barrier_mask InputMask, barrier_mask OutputMask)
 {
