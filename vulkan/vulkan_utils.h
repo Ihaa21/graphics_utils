@@ -46,7 +46,7 @@ struct barrier_mask
     VkPipelineStageFlags StageMask;
 };
 
-struct vk_barrier_batcher
+struct vk_barrier_manager
 {
     u32 MaxNumImageBarriers;
     u32 NumImageBarriers;
@@ -64,7 +64,7 @@ struct vk_barrier_batcher
 // NOTE: Descriptor Updater
 //
 
-struct vk_desc_updater
+struct vk_descriptor_manager
 {
     linear_arena Arena;
     
@@ -104,9 +104,7 @@ struct vk_image_transfer
 };
 
 // TODO: Add resource reading 
-// TODO: Make this be a thing that goes into diff modes depending on the game state
-// TODO: Free the extra memory when we set this into game play mode
-struct vk_transfer_updater
+struct vk_transfer_manager
 {
     linear_arena Arena;
 

@@ -439,7 +439,7 @@ inline VkRenderPass VkRenderPassColorDepth(VkDevice Device, VkAttachmentDescript
 }
 
 //
-// NOTE: Barrier Batcher
+// NOTE: Barrier Manager
 //
 
 inline barrier_mask BarrierMask(VkAccessFlagBits AccessMask, VkPipelineStageFlags StageMask)
@@ -451,9 +451,9 @@ inline barrier_mask BarrierMask(VkAccessFlagBits AccessMask, VkPipelineStageFlag
     return Result;
 }
 
-inline vk_barrier_batcher VkBarrierBatcherCreate(linear_arena* Arena, u32 MaxNumBarriers)
+inline vk_barrier_manager VkBarrierManagerCreate(linear_arena* Arena, u32 MaxNumBarriers)
 {
-    vk_barrier_batcher Result = {};
+    vk_barrier_manager Result = {};
 
     Result.MaxNumImageBarriers = MaxNumBarriers;
     Result.ImageBarrierArray = PushArray(Arena, VkImageMemoryBarrier, MaxNumBarriers);
@@ -464,7 +464,7 @@ inline vk_barrier_batcher VkBarrierBatcherCreate(linear_arena* Arena, u32 MaxNum
     return Result;
 }
 
-inline void VkBarrierBufferAdd(vk_barrier_batcher* Batcher, VkAccessFlagBits InputAccessMask, VkPipelineStageFlags InputStageMask,
+inline void VkBarrierBufferAdd(vk_barrier_manager* Batcher, VkAccessFlagBits InputAccessMask, VkPipelineStageFlags InputStageMask,
                                VkAccessFlagBits OutputAccessMask, VkPipelineStageFlags OutputStageMask, VkBuffer Buffer)
 {
     Assert(Batcher->NumBufferBarriers < Batcher->MaxNumBufferBarriers);
@@ -483,12 +483,12 @@ inline void VkBarrierBufferAdd(vk_barrier_batcher* Batcher, VkAccessFlagBits Inp
     Batcher->DstStageFlags |= OutputStageMask;
 }
 
-inline void VkBarrierBufferAdd(vk_barrier_batcher* Batcher, barrier_mask InputMask, barrier_mask OutputMask, VkBuffer Buffer)
+inline void VkBarrierBufferAdd(vk_barrier_manager* Batcher, barrier_mask InputMask, barrier_mask OutputMask, VkBuffer Buffer)
 {
     VkBarrierBufferAdd(Batcher, InputMask.AccessMask, InputMask.StageMask, OutputMask.AccessMask, OutputMask.StageMask, Buffer);
 }
 
-inline void VkBarrierImageAdd(vk_barrier_batcher* Batcher, VkAccessFlagBits InputAccessMask, VkPipelineStageFlags InputStageMask,
+inline void VkBarrierImageAdd(vk_barrier_manager* Batcher, VkAccessFlagBits InputAccessMask, VkPipelineStageFlags InputStageMask,
                               VkImageLayout InputLayout, VkAccessFlagBits OutputAccessMask, VkPipelineStageFlags OutputStageMask,
                               VkImageLayout OutputLayout, VkImageAspectFlags AspectFlags, VkImage Image)
 {
@@ -513,7 +513,7 @@ inline void VkBarrierImageAdd(vk_barrier_batcher* Batcher, VkAccessFlagBits Inpu
     Batcher->DstStageFlags |= OutputStageMask;
 }
 
-inline void VkBarrierImageAdd(vk_barrier_batcher* Batcher, barrier_mask InputMask, VkImageLayout InputLayout, barrier_mask OutputMask,
+inline void VkBarrierImageAdd(vk_barrier_manager* Batcher, barrier_mask InputMask, VkImageLayout InputLayout, barrier_mask OutputMask,
                               VkImageLayout OutputLayout, VkImageAspectFlags AspectFlags,
                               VkImage Image)
 {
@@ -521,7 +521,7 @@ inline void VkBarrierImageAdd(vk_barrier_batcher* Batcher, barrier_mask InputMas
                       OutputLayout, AspectFlags, Image);
 }
 
-inline void VkBarrierBatcherFlush(vk_barrier_batcher* Batcher, VkCommandBuffer CmdBuffer)
+inline void VkBarrierManagerFlush(vk_barrier_manager* Batcher, VkCommandBuffer CmdBuffer)
 {
     vkCmdPipelineBarrier(CmdBuffer, Batcher->SrcStageFlags, Batcher->DstStageFlags, VK_DEPENDENCY_BY_REGION_BIT, 0, 0,
                          Batcher->NumBufferBarriers, Batcher->BufferBarrierArray, Batcher->NumImageBarriers, Batcher->ImageBarrierArray);
@@ -533,12 +533,12 @@ inline void VkBarrierBatcherFlush(vk_barrier_batcher* Batcher, VkCommandBuffer C
 }
 
 //
-// NOTE: Descriptor Updater
+// NOTE: Descriptor Manager
 //
 
-inline vk_desc_updater VkDescUpdaterCreate(linear_arena* Arena, u32 MaxNumWrites)
+inline vk_descriptor_manager VkDescriptorManagerCreate(linear_arena* Arena, u32 MaxNumWrites)
 {
-    vk_desc_updater Result = {};
+    vk_descriptor_manager Result = {};
 
     u32 ArenaSize = (sizeof(VkWriteDescriptorSet)*MaxNumWrites +
                      Max((u32)sizeof(VkDescriptorImageInfo), (u32)sizeof(VkDescriptorBufferInfo))*MaxNumWrites);
@@ -549,8 +549,8 @@ inline vk_desc_updater VkDescUpdaterCreate(linear_arena* Arena, u32 MaxNumWrites
     return Result;
 }
 
-inline void VkDescBufferWrite(vk_desc_updater* Updater, VkDescriptorSet Set, u32 Binding,
-                              VkDescriptorType DescType, VkBuffer Buffer)
+inline void VkDescriptorBufferWrite(vk_descriptor_manager* Updater, VkDescriptorSet Set, u32 Binding,
+                                    VkDescriptorType DescType, VkBuffer Buffer)
 {
     VkDescriptorBufferInfo* BufferInfo = PushStruct(&Updater->Arena, VkDescriptorBufferInfo);
     BufferInfo->buffer = Buffer;
@@ -568,9 +568,9 @@ inline void VkDescBufferWrite(vk_desc_updater* Updater, VkDescriptorSet Set, u32
     DsWrite->pBufferInfo = BufferInfo;
 }
 
-inline void VkDescImageWrite(vk_desc_updater* Updater, VkDescriptorSet Set, u32 Binding,
-                             VkDescriptorType DescType, VkImageView ImageView, VkSampler Sampler,
-                             VkImageLayout ImageLayout)
+inline void VkDescriptorImageWrite(vk_descriptor_manager* Updater, VkDescriptorSet Set, u32 Binding,
+                                   VkDescriptorType DescType, VkImageView ImageView, VkSampler Sampler,
+                                   VkImageLayout ImageLayout)
 {
     VkDescriptorImageInfo* ImageInfo = PushStruct(&Updater->Arena, VkDescriptorImageInfo);
     ImageInfo->sampler = Sampler;
@@ -588,7 +588,7 @@ inline void VkDescImageWrite(vk_desc_updater* Updater, VkDescriptorSet Set, u32 
     DsWrite->pImageInfo = ImageInfo;
 }
 
-inline void VkDescUpdaterFlush(VkDevice Device, vk_desc_updater* Updater)
+inline void VkDescriptorManagerFlush(VkDevice Device, vk_descriptor_manager* Updater)
 {
     vkUpdateDescriptorSets(Device, Updater->NumWrites, Updater->WriteArray, 0, 0);
 
@@ -597,14 +597,14 @@ inline void VkDescUpdaterFlush(VkDevice Device, vk_desc_updater* Updater)
 }
 
 //
-// NOTE: Transfer Updater
+// NOTE: Transfer Manager
 //
 
-inline vk_transfer_updater VkTransferUpdaterCreate(VkDevice Device, u32 StagingTypeId, linear_arena* CpuArena,
+inline vk_transfer_manager VkTransferManagerCreate(VkDevice Device, u32 StagingTypeId, linear_arena* CpuArena,
                                                    vk_gpu_linear_arena* GpuArena, u32 FlushAlignment, u64 StagingSize,
                                                    u32 MaxNumBufferTransfers, u32 MaxNumImageTransfers)
 {
-    vk_transfer_updater Result = {};
+    vk_transfer_manager Result = {};
 
     // TODO: Fix this
     u32 ArenaSize = (500*MaxNumBufferTransfers);
@@ -647,7 +647,7 @@ inline vk_transfer_updater VkTransferUpdaterCreate(VkDevice Device, u32 StagingT
     (Type*)VkTransferPushBufferWrite(Updater, Buffer, sizeof(Type), Alignment, InputMask, OutputMask)
 #define VkTransferPushBufferWriteArray(Updater, Buffer, Type, Count, Alignment, InputMask, OutputMask) \
     (Type*)VkTransferPushBufferWrite(Updater, Buffer, sizeof(Type)*Count, Alignment, InputMask, OutputMask)
-inline u8* VkTransferPushBufferWrite(vk_transfer_updater* Updater, VkBuffer Buffer, u32 BufferSize, mm Alignment,
+inline u8* VkTransferPushBufferWrite(vk_transfer_manager* Updater, VkBuffer Buffer, u32 BufferSize, mm Alignment,
                                      barrier_mask InputMask, barrier_mask OutputMask)
 {
     Updater->StagingOffset = AlignAddress(Updater->StagingOffset, Alignment);
@@ -666,7 +666,7 @@ inline u8* VkTransferPushBufferWrite(vk_transfer_updater* Updater, VkBuffer Buff
     return Result;
 }
 
-inline u8* VkTransferPushImageWrite(vk_transfer_updater* Updater, VkImage Image, u32 Width, u32 Height, u32 ImageSize,
+inline u8* VkTransferPushImageWrite(vk_transfer_manager* Updater, VkImage Image, u32 Width, u32 Height, u32 ImageSize,
                                     VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
                                     barrier_mask InputMask, barrier_mask OutputMask)
 {
@@ -688,7 +688,7 @@ inline u8* VkTransferPushImageWrite(vk_transfer_updater* Updater, VkImage Image,
     return Result;
 }
 
-inline void VkTransferUpdaterFlush(vk_transfer_updater* Updater, VkDevice Device, VkCommandBuffer CmdBuffer, vk_barrier_batcher* Batcher)
+inline void VkTransferManagerFlush(vk_transfer_manager* Updater, VkDevice Device, VkCommandBuffer CmdBuffer, vk_barrier_manager* Batcher)
 {
     VkMappedMemoryRange FlushRange = {};
     FlushRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
@@ -708,7 +708,7 @@ inline void VkTransferUpdaterFlush(vk_transfer_updater* Updater, VkDevice Device
             VkBarrierBufferAdd(Batcher, BufferTransfer->InputMask, IntermediateMask, BufferTransfer->Buffer);
         }
 
-        VkBarrierBatcherFlush(Batcher, CmdBuffer);
+        VkBarrierManagerFlush(Batcher, CmdBuffer);
         
         for (u32 BufferId = 0; BufferId < Updater->NumBufferTransfers; ++BufferId)
         {
@@ -729,7 +729,7 @@ inline void VkTransferUpdaterFlush(vk_transfer_updater* Updater, VkDevice Device
             VkBarrierBufferAdd(Batcher, IntermediateMask, BufferTransfer->OutputMask, BufferTransfer->Buffer);
         }
 
-        VkBarrierBatcherFlush(Batcher, CmdBuffer);
+        VkBarrierManagerFlush(Batcher, CmdBuffer);
         Updater->NumBufferTransfers = 0;
     }
     
@@ -743,7 +743,7 @@ inline void VkTransferUpdaterFlush(vk_transfer_updater* Updater, VkDevice Device
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->AspectMask, ImageTransfer->Image);
         }
 
-        VkBarrierBatcherFlush(Batcher, CmdBuffer);
+        VkBarrierManagerFlush(Batcher, CmdBuffer);
 
         for (u32 ImageId = 0; ImageId < Updater->NumImageTransfers; ++ImageId)
         {
@@ -776,7 +776,7 @@ inline void VkTransferUpdaterFlush(vk_transfer_updater* Updater, VkDevice Device
                               ImageTransfer->OutputLayout, ImageTransfer->AspectMask, ImageTransfer->Image);
         }
 
-        VkBarrierBatcherFlush(Batcher, CmdBuffer);
+        VkBarrierManagerFlush(Batcher, CmdBuffer);
         Updater->NumImageTransfers = 0;
     }
         
