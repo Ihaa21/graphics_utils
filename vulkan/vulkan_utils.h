@@ -1,6 +1,11 @@
 #pragma once
 
-// TODO: Figure out names of everything here
+#include "math\math.h"
+
+//
+// NOTE: Memory
+//
+
 struct vk_gpu_ptr
 {
     VkDeviceMemory* Memory;
@@ -21,22 +26,42 @@ struct vk_gpu_temp_mem
 };
 
 //
+// NOTE: Descriptor Layout Builder
+//
+
+struct vk_descriptor_layout_builder
+{
+    u32 CurrNumBindings;
+    VkDescriptorSetLayoutBinding Bindings[10];
+    VkDescriptorSetLayout* Layout;
+};
+
+//
 // NOTE: Barrier Batcher
 //
 
+struct barrier_mask
+{
+    VkAccessFlagBits AccessMask;
+    VkPipelineStageFlags StageMask;
+};
+
 struct vk_barrier_batcher
 {
-    u32 MaxNumImgBarriers;
-    u32 NumImgBarriers;
-    VkImageMemoryBarrier* ImgBarrierArray;
+    u32 MaxNumImageBarriers;
+    u32 NumImageBarriers;
+    VkImageMemoryBarrier* ImageBarrierArray;
 
     u32 MaxNumBufferBarriers;
     u32 NumBufferBarriers;
     VkBufferMemoryBarrier* BufferBarrierArray;
+
+    VkPipelineStageFlags SrcStageFlags;
+    VkPipelineStageFlags DstStageFlags;
 };
 
 //
-// NOTE: Desc Updater
+// NOTE: Descriptor Updater
 //
 
 struct vk_desc_updater
@@ -57,30 +82,28 @@ struct vk_buffer_transfer
     VkBuffer Buffer;
     u32 Size;
     u64 StagingOffset;
-    VkAccessFlags DstAccessMask;
-};
 
-// TODO: Currently unused
-struct vk_buffer_update
-{
-    VkBuffer Buffer;
-    u32 Size;
-    u64 StagingOffset;
-    u32 DstOffset;
-    VkAccessFlags DstAccessMask;
+    barrier_mask InputMask;
+    barrier_mask OutputMask;
 };
 
 struct vk_image_transfer
 {
     u64 StagingOffset;
-    
+
+    VkImageAspectFlags AspectMask;
     VkImage Image;
     u32 Width;
     u32 Height;
-    VkImageLayout Layout;
-    VkImageAspectFlagBits AspectMask;
+    
+    barrier_mask InputMask;
+    VkImageLayout InputLayout;
+
+    barrier_mask OutputMask;
+    VkImageLayout OutputLayout;
 };
 
+// TODO: Add resource reading 
 // TODO: Make this be a thing that goes into diff modes depending on the game state
 // TODO: Free the extra memory when we set this into game play mode
 struct vk_transfer_updater
@@ -106,9 +129,17 @@ struct vk_transfer_updater
     u32 MaxNumImageTransfers;
     u32 NumImageTransfers;
     vk_image_transfer* ImageTransferArray;
-
-    // NOTE: Buffer update data
-    u32 MaxNumBufferUpdates;
-    u32 NumBufferUpdates;
-    vk_buffer_update* BufferUpdateArray;
 };
+
+//
+// NOTE: Helper structs
+//
+
+struct vk_commands
+{
+    VkCommandBuffer Buffer;
+    VkSemaphore FinishSemaphore;
+    VkFence Fence;
+};
+
+#include "vulkan_utils.cpp"
