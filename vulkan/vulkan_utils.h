@@ -136,7 +136,6 @@ struct vk_transfer_manager
 struct vk_commands
 {
     VkCommandBuffer Buffer;
-    VkSemaphore FinishSemaphore;
     VkFence Fence;
 };
 

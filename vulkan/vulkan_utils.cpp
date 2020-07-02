@@ -67,12 +67,6 @@ inline aabb2i VkClipConversion(u32 RenderHeight, aabb2i ClipBounds)
 // NOTE: Memory Allocators
 //
 
-inline u64 VkAlignAddress(u64 Address, u64 Alignment)
-{
-    u64 Result = (Address + (Alignment-1)) & ~(Alignment-1);
-    return Result;
-}
-
 inline vk_gpu_linear_arena VkGpuLinearArenaCreate(VkDeviceMemory Memory, u64 Size)
 {
     vk_gpu_linear_arena Result = {};
@@ -84,10 +78,8 @@ inline vk_gpu_linear_arena VkGpuLinearArenaCreate(VkDeviceMemory Memory, u64 Siz
 
 inline vk_gpu_ptr VkPushSize(vk_gpu_linear_arena* Arena, u64 Size, u64 Alignment)
 {
-    Assert(Alignment != 0);
-    
     // TODO: Can we assume that our memory is aligned to our resources max requirement?
-    u64 AlignedOffset = VkAlignAddress(Arena->Used, Alignment);
+    u64 AlignedOffset = AlignAddress(Arena->Used, Alignment);
     Assert(AlignedOffset + Size <= Arena->Size);
     
     vk_gpu_ptr Result = {};
@@ -167,16 +159,72 @@ inline vk_commands VkCommandsCreate(VkDevice Device, VkCommandPool Pool)
     CmdBufferAllocateInfo.commandBufferCount = 1;
     VkCheckResult(vkAllocateCommandBuffers(Device, &CmdBufferAllocateInfo, &Result.Buffer));
 
-    VkSemaphoreCreateInfo SemaphoreCreateInfo = {};
-    SemaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    VkCheckResult(vkCreateSemaphore(Device, &SemaphoreCreateInfo, 0, &Result.FinishSemaphore));
-
     VkFenceCreateInfo FenceCreateInfo = {};
     FenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     FenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     VkCheckResult(vkCreateFence(Device, &FenceCreateInfo, 0, &Result.Fence));
 
     return Result;
+}
+
+inline void VkCommandsBegin(VkDevice Device, vk_commands Commands)
+{
+    VkCheckResult(vkWaitForFences(Device, 1, &Commands.Fence, VK_TRUE, 0xFFFFFFFF));
+    VkCheckResult(vkResetFences(Device, 1, &Commands.Fence));
+    
+    VkCommandBufferBeginInfo BeginInfo = {};
+    BeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCheckResult(vkBeginCommandBuffer(Commands.Buffer, &BeginInfo));
+}
+
+inline void VkCommandsSubmit(VkQueue Queue, vk_commands Commands)
+{
+    VkCheckResult(vkEndCommandBuffer(Commands.Buffer));
+
+    VkSubmitInfo SubmitInfo = {};
+    SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.commandBufferCount = 1;
+    SubmitInfo.pCommandBuffers = &Commands.Buffer;
+    VkCheckResult(vkQueueSubmit(Queue, 1, &SubmitInfo, Commands.Fence));
+}
+
+//
+// NOTE: Shader Helpers
+//
+
+inline VkShaderModule VkCreateShaderModule(VkDevice Device, linear_arena* TempArena, char* FileName)
+{
+    temp_mem TempMem = BeginTempMem(TempArena);
+    
+    FILE* File = fopen(FileName, "rb");
+    if (!File)
+    {
+        InvalidCodePath;
+    }
+
+    fseek(File, 0, SEEK_END);
+    u32 CodeSize = ftell(File);
+    fseek(File, 0, SEEK_SET);
+    u32* Code = (u32*)PushSize(TempArena, CodeSize);
+    fread(Code, CodeSize, 1, File);
+    fclose(File);
+    
+    VkShaderModuleCreateInfo ShaderModuleCreateInfo =
+        {
+            VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            0,
+            0,
+            CodeSize,
+            Code,
+        };
+
+    VkShaderModule ShaderModule;
+    VkCheckResult(vkCreateShaderModule(Device, &ShaderModuleCreateInfo, 0, &ShaderModule));
+
+    EndTempMem(TempMem);
+    
+    return ShaderModule;
 }
 
 //
@@ -611,7 +659,7 @@ inline vk_transfer_manager VkTransferManagerCreate(VkDevice Device, u32 StagingT
     Result.Arena = LinearSubArena(CpuArena, ArenaSize);
     Result.FlushAlignment = FlushAlignment;
 
-    StagingSize = VkAlignAddress(StagingSize, FlushAlignment);
+    StagingSize = AlignAddress(StagingSize, FlushAlignment);
     
     // NOTE: Staging data
     {
@@ -694,12 +742,13 @@ inline void VkTransferManagerFlush(vk_transfer_manager* Updater, VkDevice Device
     FlushRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
     FlushRange.memory = Updater->StagingMem;
     FlushRange.offset = 0;
-    FlushRange.size = VkAlignAddress(Updater->StagingOffset, Updater->FlushAlignment);
+    FlushRange.size = AlignAddress(Updater->StagingOffset, Updater->FlushAlignment);
     vkFlushMappedMemoryRanges(Device, 1, &FlushRange);
 
     barrier_mask IntermediateMask = BarrierMask(VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     
     // NOTE: Transfer all buffers
+    if (Updater->NumBufferTransfers > 0)
     {
         for (u32 BufferId = 0; BufferId < Updater->NumBufferTransfers; ++BufferId)
         {
@@ -734,6 +783,7 @@ inline void VkTransferManagerFlush(vk_transfer_manager* Updater, VkDevice Device
     }
     
     // NOTE: Transfer all images
+    if (Updater->NumImageTransfers > 0)
     {
         for (u32 ImageId = 0; ImageId < Updater->NumImageTransfers; ++ImageId)
         {
