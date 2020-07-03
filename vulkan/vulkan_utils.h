@@ -80,7 +80,7 @@ struct vk_descriptor_manager
 struct vk_buffer_transfer
 {
     VkBuffer Buffer;
-    u32 Size;
+    u64 Size;
     u64 StagingOffset;
 
     barrier_mask InputMask;
@@ -109,7 +109,7 @@ struct vk_transfer_manager
     linear_arena Arena;
 
     // NOTE: Vk Constants
-    u32 FlushAlignment;
+    u64 FlushAlignment;
     
     // NOTE: Staging data
     u64 StagingSize;
