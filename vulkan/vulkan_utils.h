@@ -37,6 +37,35 @@ struct vk_descriptor_layout_builder
 };
 
 //
+// NOTE: Render Pass Builder
+//
+
+struct vk_render_pass_builder
+{
+    temp_mem TempMem;
+    linear_arena* Arena;
+
+    // NOTE: Attachment Data
+    u32 MaxNumAttachments;
+    u32 NumAttachments;
+    VkAttachmentDescription* Attachments;
+
+    // NOTE: SubPass data
+    u32 MaxNumColorAttachmentRefs;
+    u32 NumColorAttachmentRefs;
+    VkAttachmentReference* ColorAttachmentRefs;
+
+    u32 MaxNumDepthAttachmentRefs;
+    u32 NumDepthAttachmentRefs;
+    VkAttachmentReference* DepthAttachmentRefs;
+    
+    u32 MaxNumSubPasses;
+    u32 NumSubPasses;
+    VkSubpassDescription* SubPasses;
+    
+};
+
+//
 // NOTE: Barrier Batcher
 //
 
@@ -72,6 +101,136 @@ struct vk_descriptor_manager
     u32 NumWrites;
     VkWriteDescriptorSet* WriteArray;
 };
+
+//
+// NOTE: Pipeline Manager
+//
+
+struct vk_pipeline
+{
+    VkPipeline Handle;
+    VkPipelineLayout Layout;
+};
+
+struct vk_shader_ref
+{
+    char* FileName;
+    char* MainName;
+    FILETIME ModifiedTime;
+};
+
+enum vk_pipeline_entry_type
+{
+    VkPipelineEntry_None,
+    
+    VkPipelineEntry_Graphics,
+    VkPipelineEntry_Compute,
+};
+
+struct vk_pipeline_graphics_entry
+{
+    VkVertexInputBindingDescription* VertBindings;
+    VkVertexInputAttributeDescription* VertAttributes;
+    VkPipelineVertexInputStateCreateInfo VertexInputState;
+    
+    VkPipelineInputAssemblyStateCreateInfo InputAssemblyState;
+    VkPipelineTessellationStateCreateInfo TessellationState;
+
+    VkViewport* ViewPorts;
+    VkRect2D* Scissors;
+    VkPipelineViewportStateCreateInfo ViewportState;
+    
+    VkPipelineRasterizationStateCreateInfo RasterizationState;
+    VkPipelineMultisampleStateCreateInfo MultisampleState;    
+    VkPipelineDepthStencilStateCreateInfo DepthStencilState;
+
+    VkPipelineColorBlendAttachmentState* Attachments;
+    VkPipelineColorBlendStateCreateInfo ColorBlendState;
+
+    VkDynamicState* DynamicStates;
+    VkPipelineDynamicStateCreateInfo DynamicStateCreateInfo;
+    
+    VkGraphicsPipelineCreateInfo PipelineCreateInfo;
+};
+
+struct vk_pipeline_compute_entry
+{
+    VkComputePipelineCreateInfo PipelineCreateInfo;
+};
+
+#define VK_MAX_NUM_HANDLES 5
+struct vk_pipeline_entry
+{
+    vk_pipeline_entry_type Type;
+    union
+    {
+        vk_pipeline_graphics_entry GraphicsEntry;
+        vk_pipeline_compute_entry ComputeEntry;
+    };
+
+    u32 NumShaders;
+    vk_shader_ref ShaderRefs[VK_MAX_NUM_HANDLES];
+
+    vk_pipeline Pipeline;
+};
+
+struct vk_pipeline_manager
+{
+    u32 MaxNumPipelines;
+    u32 NumPipelines;
+    vk_pipeline_entry* PipelineArray;
+};
+
+//
+// NOTE: Pipline Builder
+//
+
+enum vk_pipeline_builder_flags
+{
+    VkPipelineFlag_HasDepthStencil = 1 << 0,
+};
+
+struct vk_pipeline_builder
+{
+    linear_arena* Arena;
+    temp_mem TempMem;
+
+    u32 Flags;
+
+    // NOTE: Shader data
+    // TODO: Add support for GS, TS, mesh shaders, etc.
+    char* VsFileName;
+    char* VsMainName;
+    char* PsFileName;
+    char* PsMainName;
+    
+    // NOTE: Vertex data
+    u32 CurrVertexBindingSize;
+    u32 CurrVertexLocation;
+
+    u32 MaxNumVertexBindings;
+    u32 NumVertexBindings;
+    VkVertexInputBindingDescription* VertexBindings;
+
+    u32 MaxNumVertexAttributes;
+    u32 NumVertexAttributes;
+    VkVertexInputAttributeDescription* VertexAttributes;
+
+    // NOTE: Input Assembly Data
+    VkPipelineInputAssemblyStateCreateInfo InputAssembly;
+    
+    // NOTE: Depth Stencil Data
+    VkPipelineDepthStencilStateCreateInfo DepthStencil;
+
+    // NOTE: Color Attachment Data
+    u32 MaxNumColorAttachments;
+    u32 NumColorAttachments;
+    VkPipelineColorBlendAttachmentState* ColorAttachments;
+    
+    VkGraphicsPipelineCreateInfo PipelineCreateInfo;
+};
+
+inline void VkPipelineInputAssemblyAdd(vk_pipeline_builder* Builder, VkPrimitiveTopology Topology, VkBool32 PrimRestart);
 
 //
 // NOTE: Transfer updater
@@ -137,6 +296,12 @@ struct vk_commands
 {
     VkCommandBuffer Buffer;
     VkFence Fence;
+};
+
+struct vk_image
+{
+    VkImage Image;
+    VkImageView View;
 };
 
 #include "vulkan_utils.cpp"

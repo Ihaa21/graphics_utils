@@ -187,44 +187,6 @@ inline void VkCommandsSubmit(VkQueue Queue, vk_commands Commands)
 }
 
 //
-// NOTE: Shader Helpers
-//
-
-inline VkShaderModule VkCreateShaderModule(VkDevice Device, linear_arena* TempArena, char* FileName)
-{
-    temp_mem TempMem = BeginTempMem(TempArena);
-    
-    FILE* File = fopen(FileName, "rb");
-    if (!File)
-    {
-        InvalidCodePath;
-    }
-
-    fseek(File, 0, SEEK_END);
-    u32 CodeSize = ftell(File);
-    fseek(File, 0, SEEK_SET);
-    u32* Code = (u32*)PushSize(TempArena, CodeSize);
-    fread(Code, CodeSize, 1, File);
-    fclose(File);
-    
-    VkShaderModuleCreateInfo ShaderModuleCreateInfo =
-        {
-            VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-            0,
-            0,
-            CodeSize,
-            Code,
-        };
-
-    VkShaderModule ShaderModule;
-    VkCheckResult(vkCreateShaderModule(Device, &ShaderModuleCreateInfo, 0, &ShaderModule));
-
-    EndTempMem(TempMem);
-    
-    return ShaderModule;
-}
-
-//
 // NOTE: Buffer Helpers
 //
 
@@ -276,7 +238,7 @@ inline VkBufferView VkBufferViewCreate(VkDevice Device, VkBuffer Buffer, VkForma
 //
 
 inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Width, u32 Height,
-                            VkFormat Format, i32 Usage, VkImageAspectFlags AspectMask, VkImage* OutImage,
+                            VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkImage* OutImage,
                             VkImageView* OutImageView)
 {
     VkImageCreateInfo ImageCreateInfo = {};
@@ -318,37 +280,6 @@ inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Wid
     ImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
     ImgViewCreateInfo.subresourceRange.layerCount = 1;
     VkCheckResult(vkCreateImageView(Device, &ImgViewCreateInfo, 0, OutImageView));
-}
-
-//
-// NOTE: Pipeline Helpers
-//
-
-inline void VkComputePipelineCreate(VkDevice Device, VkShaderModule Shader,
-                                    VkDescriptorSetLayout* Layouts, u32 NumLayouts,
-                                    VkPipeline* OutPipeline, VkPipelineLayout* OutPipelineLayout)
-{
-    VkPipelineShaderStageCreateInfo ShaderStageCreateInfo = {};
-    ShaderStageCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    ShaderStageCreateInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    ShaderStageCreateInfo.module = Shader;
-    ShaderStageCreateInfo.pName = "main";
-    ShaderStageCreateInfo.pSpecializationInfo = 0;
-            
-    VkPipelineLayoutCreateInfo LayoutCreateInfo = {};
-    LayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    LayoutCreateInfo.setLayoutCount = NumLayouts;
-    LayoutCreateInfo.pSetLayouts = Layouts;
-    VkCheckResult(vkCreatePipelineLayout(Device, &LayoutCreateInfo, 0, OutPipelineLayout));
-
-    VkComputePipelineCreateInfo PipelineCreateInfo = {};
-    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    PipelineCreateInfo.stage = ShaderStageCreateInfo;
-    PipelineCreateInfo.layout = *OutPipelineLayout;
-    PipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
-    PipelineCreateInfo.basePipelineIndex = -1;
-    VkCheckResult(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineCreateInfo, 0,
-                                           OutPipeline));
 }
 
 //
@@ -499,51 +430,106 @@ inline void VkDescriptorManagerFlush(VkDevice Device, vk_descriptor_manager* Upd
 // NOTE: Render Pass Helpers
 //
 
-inline VkAttachmentDescription VkRenderPassAttachment(VkFormat Format, VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp,
-                                                      VkImageLayout InitialLayout, VkImageLayout FinalLayout)
+// TODO: Add support for MSAA
+inline vk_render_pass_builder VkRenderPassBuilderBegin(linear_arena* Arena)
 {
-    VkAttachmentDescription Result = {};
-    Result.flags = 0;
-    Result.format = Format;
-    Result.samples = VK_SAMPLE_COUNT_1_BIT;
-    Result.loadOp = LoadOp;
-    Result.storeOp = StoreOp;
-    Result.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    Result.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Result.initialLayout = InitialLayout;
-    Result.finalLayout = FinalLayout;
+    vk_render_pass_builder Result = {};
+    Result.Arena = Arena;
+    Result.TempMem = BeginTempMem(Arena);
 
+    // IMPORTANT: These arrays should be larger if these sizes aren't enough
+    Result.MaxNumAttachments = 10;
+    Result.Attachments = PushArray(Arena, VkAttachmentDescription, Result.MaxNumAttachments);
+
+    Result.MaxNumColorAttachmentRefs = 100;
+    Result.ColorAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumColorAttachmentRefs);
+
+    Result.MaxNumDepthAttachmentRefs = 10;
+    Result.DepthAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumDepthAttachmentRefs);
+
+    Result.MaxNumSubPasses = 10;
+    Result.SubPasses = PushArray(Arena, VkSubpassDescription, Result.MaxNumSubPasses);
+    
     return Result;
 }
 
-inline VkRenderPass VkRenderPassColorDepth(VkDevice Device, VkAttachmentDescription AttachmentDescriptions[2])
+inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat Format, VkAttachmentLoadOp LoadOp,
+                                     VkAttachmentStoreOp StoreOp, VkImageLayout InitialLayout, VkImageLayout FinalLayout)
+{
+    Assert(Builder->NumAttachments < Builder->MaxNumAttachments);
+
+    u32 Id = Builder->NumAttachments++;
+    VkAttachmentDescription* Color = Builder->Attachments + Id;
+    Color->flags = 0;
+    Color->format = Format;
+    Color->samples = VK_SAMPLE_COUNT_1_BIT;
+    Color->loadOp = LoadOp;
+    Color->storeOp = StoreOp;
+    Color->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    Color->stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    Color->initialLayout = InitialLayout;
+    Color->finalLayout = FinalLayout;
+
+    return Id;
+}
+
+inline void VkRenderPassSubPassBegin(vk_render_pass_builder* Builder, VkPipelineBindPoint BindPoint)
+{
+    Assert(Builder->NumSubPasses < Builder->MaxNumSubPasses);
+
+    VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
+    *SubPass = {};
+    SubPass->pipelineBindPoint = BindPoint;
+    SubPass->pColorAttachments = Builder->ColorAttachmentRefs + Builder->NumColorAttachmentRefs;
+}
+
+inline void VkRenderPassColorRefAdd(vk_render_pass_builder* Builder, u32 AttachmentId, VkImageLayout Layout)
+{
+    Assert(Builder->NumColorAttachmentRefs < Builder->MaxNumColorAttachmentRefs);
+    Assert(AttachmentId < Builder->NumAttachments);
+
+    VkAttachmentReference* Reference = Builder->ColorAttachmentRefs + Builder->NumColorAttachmentRefs++;
+    *Reference = {};
+    Reference->attachment = AttachmentId;
+    Reference->layout = Layout;
+    
+    VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
+    SubPass->colorAttachmentCount += 1;
+}
+
+inline void VkRenderPassDepthRefAdd(vk_render_pass_builder* Builder, u32 AttachmentId, VkImageLayout Layout)
+{
+    Assert(Builder->NumDepthAttachmentRefs < Builder->MaxNumDepthAttachmentRefs);
+    Assert(AttachmentId < Builder->NumAttachments);
+
+    VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
+    SubPass->pDepthStencilAttachment = Builder->DepthAttachmentRefs + Builder->NumDepthAttachmentRefs;
+
+    VkAttachmentReference* Reference = Builder->DepthAttachmentRefs + Builder->NumDepthAttachmentRefs++;
+    *Reference = {};
+    Reference->attachment = AttachmentId;
+    Reference->layout = Layout;
+}
+
+inline void VkRenderPassSubPassEnd(vk_render_pass_builder* Builder)
+{
+    Builder->NumSubPasses++;
+}
+
+inline VkRenderPass VkRenderPassBuilderEnd(vk_render_pass_builder* Builder, VkDevice Device)
 {
     VkRenderPass Result = {};
-
-    // IMPORTANT: We assume first attachment is color, second is depth
-    VkAttachmentReference ColorReference = {};
-    ColorReference.attachment = 0;
-    ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference DepthReference = {};
-    DepthReference.attachment = 1;
-    DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription SubpassDescriptions[1] = {};
-    SubpassDescriptions[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    SubpassDescriptions[0].colorAttachmentCount = 1;
-    SubpassDescriptions[0].pColorAttachments = &ColorReference;
-    SubpassDescriptions[0].pDepthStencilAttachment = &DepthReference;
-        
+    
     VkRenderPassCreateInfo RenderPassCreateInfo = {};
     RenderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    RenderPassCreateInfo.attachmentCount = 2;
-    RenderPassCreateInfo.pAttachments = AttachmentDescriptions;
-    RenderPassCreateInfo.subpassCount = 1;
-    RenderPassCreateInfo.pSubpasses = SubpassDescriptions;
-
+    RenderPassCreateInfo.attachmentCount = Builder->NumAttachments;
+    RenderPassCreateInfo.pAttachments = Builder->Attachments;
+    RenderPassCreateInfo.subpassCount = Builder->NumSubPasses;
+    RenderPassCreateInfo.pSubpasses = Builder->SubPasses;
     VkCheckResult(vkCreateRenderPass(Device, &RenderPassCreateInfo, 0, &Result));
 
+    EndTempMem(Builder->TempMem);
+    
     return Result;
 }
 
@@ -639,6 +625,556 @@ inline void VkBarrierManagerFlush(vk_barrier_manager* Batcher, VkCommandBuffer C
     Batcher->NumImageBarriers = 0;
     Batcher->SrcStageFlags = 0;
     Batcher->DstStageFlags = 0;
+}
+
+//
+// NOTE: Pipeline Manager
+//
+
+inline VkPipelineShaderStageCreateInfo VkPipelineShaderStage(VkShaderStageFlagBits Stage, VkShaderModule Module, char* MainName)
+{
+    VkPipelineShaderStageCreateInfo Result = {};
+    Result.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    Result.stage = Stage;
+    Result.module = Module;
+    Result.pName = MainName;
+    
+    return Result;
+}
+
+inline VkShaderModule VkPipelineAddShaderRef(VkDevice Device, HANDLE File, linear_arena* TempArena, char* FileName, char* MainName,
+                                             vk_shader_ref* Ref)
+{
+    temp_mem TempMem = BeginTempMem(TempArena);
+    
+    // NOTE: Get File code
+    LARGE_INTEGER CodeSize = {};
+    if (!GetFileSizeEx(File, &CodeSize))
+    {
+        DWORD Error = GetLastError();
+        InvalidCodePath;
+    }
+    Assert(CodeSize.HighPart == 0);
+
+    u32* Code = (u32*)PushSize(TempArena, CodeSize.LowPart);
+    if (!ReadFile(File, Code, CodeSize.LowPart, 0, 0))
+    {
+        DWORD Error = GetLastError();
+        InvalidCodePath;
+    }
+
+    // NOTE: Populate Ref
+    Ref->FileName = FileName;
+    Ref->MainName = MainName;
+    if (!GetFileTime(File, 0, 0, &Ref->ModifiedTime))
+    {
+        DWORD Error = GetLastError();
+        InvalidCodePath;
+    }
+    
+    CloseHandle(File);
+    
+    VkShaderModuleCreateInfo ShaderModuleCreateInfo = {};
+    ShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ShaderModuleCreateInfo.codeSize = CodeSize.LowPart;
+    ShaderModuleCreateInfo.pCode = Code;
+
+    VkShaderModule Result;
+    VkCheckResult(vkCreateShaderModule(Device, &ShaderModuleCreateInfo, 0, &Result));
+    EndTempMem(TempMem);
+    
+    return Result;
+}
+
+inline VkShaderModule VkPipelineAddShaderRef(VkDevice Device, linear_arena* TempArena, char* FileName, char* MainName, vk_shader_ref* Ref)
+{
+    HANDLE File = CreateFileA(FileName, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    if (File == INVALID_HANDLE_VALUE)
+    {
+        DWORD Error = GetLastError();
+        InvalidCodePath;
+    }
+
+    VkShaderModule Result = VkPipelineAddShaderRef(Device, File, TempArena, FileName, MainName, Ref);
+    return Result;
+}
+
+inline vk_pipeline_manager VkPipelineManagerCreate(linear_arena* Arena)
+{
+    vk_pipeline_manager Result = {};
+    Result.MaxNumPipelines = 100; // TODO: This is hardcoded for now
+    Result.PipelineArray = PushArray(Arena, vk_pipeline_entry, Result.MaxNumPipelines);
+
+    return Result;
+}
+
+inline vk_pipeline* VkPipelineCsCreate(VkDevice Device, vk_pipeline_manager* Manager, linear_arena* TempArena, char* FileName,
+                                       char* MainName, VkDescriptorSetLayout* Layouts, u32 NumLayouts)
+{
+    Assert(Manager->NumPipelines < Manager->MaxNumPipelines);
+    vk_pipeline_entry* Entry = Manager->PipelineArray + Manager->NumPipelines++;
+    *Entry = {};
+    Entry->Type = VkPipelineEntry_Compute;
+
+    // NOTE: Setup pipeline create infos and create pipeline
+    {
+        vk_pipeline_compute_entry* ComputeEntry = &Entry->ComputeEntry;
+        VkShaderModule CsShader = VkPipelineAddShaderRef(Device, TempArena, FileName, MainName, Entry->ShaderRefs + Entry->NumShaders++);
+        VkPipelineShaderStageCreateInfo ShaderStageCreateInfo = VkPipelineShaderStage(VK_SHADER_STAGE_COMPUTE_BIT, CsShader, MainName);
+
+        VkPipelineLayoutCreateInfo LayoutCreateInfo = {};
+        LayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        LayoutCreateInfo.setLayoutCount = NumLayouts;
+        LayoutCreateInfo.pSetLayouts = Layouts;
+        VkCheckResult(vkCreatePipelineLayout(Device, &LayoutCreateInfo, 0, &Entry->Pipeline.Layout));
+
+        ComputeEntry->PipelineCreateInfo = {};
+        ComputeEntry->PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        ComputeEntry->PipelineCreateInfo.stage = ShaderStageCreateInfo;
+        ComputeEntry->PipelineCreateInfo.layout = Entry->Pipeline.Layout;
+        ComputeEntry->PipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+        ComputeEntry->PipelineCreateInfo.basePipelineIndex = -1;
+        VkCheckResult(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &ComputeEntry->PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
+
+        vkDestroyShaderModule(Device, CsShader, 0);
+    }
+    
+    return &Entry->Pipeline;
+}
+
+inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* Manager, linear_arena* Arena, char* VsFileName,
+                                         char* VsMainName, char* PsFileName, char* PsMainName,
+                                         VkPipelineLayoutCreateInfo* LayoutCreateInfo, VkGraphicsPipelineCreateInfo* PipelineCreateInfo)
+{
+    Assert(Manager->NumPipelines < Manager->MaxNumPipelines);
+    vk_pipeline_entry* Entry = Manager->PipelineArray + Manager->NumPipelines++;
+    *Entry = {};
+    Entry->Type = VkPipelineEntry_Graphics;
+
+    // NOTE: Setup pipeline create infos and create pipeline
+    {
+        vk_pipeline_graphics_entry* GraphicsEntry = &Entry->GraphicsEntry;
+
+        // NOTE: Copy all pipeline create infos
+        {
+            GraphicsEntry->VertexInputState = *PipelineCreateInfo->pVertexInputState;
+            {
+                if (GraphicsEntry->VertexInputState.vertexBindingDescriptionCount > 0)
+                {
+                    GraphicsEntry->VertBindings = PushArray(Arena, VkVertexInputBindingDescription, GraphicsEntry->VertexInputState.vertexBindingDescriptionCount);
+                    Copy(GraphicsEntry->VertexInputState.pVertexBindingDescriptions, GraphicsEntry->VertBindings, sizeof(VkVertexInputBindingDescription)*GraphicsEntry->VertexInputState.vertexBindingDescriptionCount);
+                    GraphicsEntry->VertexInputState.pVertexBindingDescriptions = GraphicsEntry->VertBindings;
+                }
+
+                if (GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount > 0)
+                {
+                    GraphicsEntry->VertAttributes = PushArray(Arena, VkVertexInputAttributeDescription, GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount);
+                    Copy(GraphicsEntry->VertexInputState.pVertexAttributeDescriptions, GraphicsEntry->VertAttributes, sizeof(VkVertexInputAttributeDescription)*GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount);
+                    GraphicsEntry->VertexInputState.pVertexAttributeDescriptions = GraphicsEntry->VertAttributes;
+                }
+            }
+            
+            GraphicsEntry->InputAssemblyState = *PipelineCreateInfo->pInputAssemblyState;
+
+            GraphicsEntry->ViewportState = *PipelineCreateInfo->pViewportState;
+            {
+                if (GraphicsEntry->ViewportState.pViewports)
+                {
+                    GraphicsEntry->ViewPorts = PushArray(Arena, VkViewport, GraphicsEntry->ViewportState.viewportCount);
+                    Copy(GraphicsEntry->ViewportState.pViewports, GraphicsEntry->ViewPorts, sizeof(VkViewport)*GraphicsEntry->ViewportState.viewportCount);
+                    GraphicsEntry->ViewportState.pViewports = GraphicsEntry->ViewPorts;
+                }
+
+                if (GraphicsEntry->ViewportState.pScissors)
+                {
+                    GraphicsEntry->Scissors = PushArray(Arena, VkRect2D, GraphicsEntry->ViewportState.scissorCount);
+                    Copy(GraphicsEntry->ViewportState.pScissors, GraphicsEntry->Scissors, sizeof(VkRect2D)*GraphicsEntry->ViewportState.scissorCount);
+                    GraphicsEntry->ViewportState.pScissors = GraphicsEntry->Scissors;
+                }
+            }
+            
+            GraphicsEntry->RasterizationState = *PipelineCreateInfo->pRasterizationState;
+            GraphicsEntry->MultisampleState = *PipelineCreateInfo->pMultisampleState;
+            
+            GraphicsEntry->ColorBlendState = *PipelineCreateInfo->pColorBlendState;
+            if (GraphicsEntry->ColorBlendState.attachmentCount > 0)
+            {
+                GraphicsEntry->Attachments = PushArray(Arena, VkPipelineColorBlendAttachmentState, GraphicsEntry->ColorBlendState.attachmentCount);
+                Copy(GraphicsEntry->ColorBlendState.pAttachments, GraphicsEntry->Attachments, sizeof(VkPipelineColorBlendAttachmentState)*GraphicsEntry->ColorBlendState.attachmentCount);
+                GraphicsEntry->ColorBlendState.pAttachments = GraphicsEntry->Attachments;
+            }
+            
+            GraphicsEntry->DynamicStateCreateInfo = *PipelineCreateInfo->pDynamicState;
+            if (GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount > 0)
+            {
+                GraphicsEntry->DynamicStates = PushArray(Arena, VkDynamicState, GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount);
+                Copy(GraphicsEntry->DynamicStateCreateInfo.pDynamicStates, GraphicsEntry->DynamicStates, sizeof(VkDynamicState)*GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount);
+                GraphicsEntry->DynamicStateCreateInfo.pDynamicStates = GraphicsEntry->DynamicStates;
+            }
+            
+            GraphicsEntry->PipelineCreateInfo = *PipelineCreateInfo;
+            GraphicsEntry->PipelineCreateInfo.pVertexInputState = &GraphicsEntry->VertexInputState;
+            GraphicsEntry->PipelineCreateInfo.pInputAssemblyState = &GraphicsEntry->InputAssemblyState;
+            GraphicsEntry->PipelineCreateInfo.pViewportState = &GraphicsEntry->ViewportState;
+            GraphicsEntry->PipelineCreateInfo.pRasterizationState = &GraphicsEntry->RasterizationState;
+            GraphicsEntry->PipelineCreateInfo.pMultisampleState = &GraphicsEntry->MultisampleState;
+            GraphicsEntry->PipelineCreateInfo.pColorBlendState = &GraphicsEntry->ColorBlendState;
+            GraphicsEntry->PipelineCreateInfo.pDynamicState = &GraphicsEntry->DynamicStateCreateInfo;
+
+            if (PipelineCreateInfo->pTessellationState)
+            {
+                GraphicsEntry->TessellationState = *PipelineCreateInfo->pTessellationState;
+                GraphicsEntry->PipelineCreateInfo.pTessellationState = &GraphicsEntry->TessellationState;
+            }
+            if (PipelineCreateInfo->pDepthStencilState)
+            {
+                GraphicsEntry->DepthStencilState = *PipelineCreateInfo->pDepthStencilState;
+                GraphicsEntry->PipelineCreateInfo.pDepthStencilState = &GraphicsEntry->DepthStencilState;
+            }
+        }
+        
+        // NOTE: Create pipeline
+        VkShaderModule VsShader = VkPipelineAddShaderRef(Device, Arena, VsFileName, VsMainName, Entry->ShaderRefs + Entry->NumShaders++);
+        VkShaderModule PsShader = VkPipelineAddShaderRef(Device, Arena, PsFileName, PsMainName, Entry->ShaderRefs + Entry->NumShaders++);
+
+        // NOTE: Setup the pipeline create infos
+        VkPipelineShaderStageCreateInfo ShaderStages[2] = {};
+        ShaderStages[0] = VkPipelineShaderStage(VK_SHADER_STAGE_VERTEX_BIT, VsShader, VsMainName);
+        ShaderStages[1] = VkPipelineShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, PsShader, PsMainName);
+        
+        VkCheckResult(vkCreatePipelineLayout(Device, LayoutCreateInfo, 0, &Entry->Pipeline.Layout));
+
+        // NOTE: Patch up some values in the create info
+        GraphicsEntry->PipelineCreateInfo.pStages = ShaderStages;
+        GraphicsEntry->PipelineCreateInfo.stageCount = ArrayCount(ShaderStages);
+        GraphicsEntry->PipelineCreateInfo.layout = Entry->Pipeline.Layout;
+        VkCheckResult(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &GraphicsEntry->PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
+
+        vkDestroyShaderModule(Device, VsShader, 0);
+        vkDestroyShaderModule(Device, PsShader, 0);
+    }
+    
+    return &Entry->Pipeline;
+}
+
+inline void VkPipelineUpdateShaders(VkDevice Device, linear_arena* TempArena, vk_pipeline_manager* Manager)
+{
+    for (u32 PipelineId = 0; PipelineId < Manager->NumPipelines; ++PipelineId)
+    {
+        vk_pipeline_entry* Entry = Manager->PipelineArray + PipelineId;
+
+        b32 ReCreatePSO = false;
+
+        HANDLE FileHandles[VK_MAX_NUM_HANDLES] = {};
+        for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
+        {
+            vk_shader_ref* CurrShaderRef = Entry->ShaderRefs + ShaderId;
+            
+            FileHandles[ShaderId] = CreateFileA(CurrShaderRef->FileName, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+            if (FileHandles[ShaderId] != INVALID_HANDLE_VALUE)
+            {
+                FILETIME CurrFileTime = {};
+                if (!GetFileTime(FileHandles[ShaderId], 0, 0, &CurrFileTime))
+                {
+                    DWORD Error = GetLastError();
+                    InvalidCodePath;
+                }
+                ReCreatePSO = ReCreatePSO || CompareFileTime(&CurrShaderRef->ModifiedTime, &CurrFileTime) == -1;
+            }
+            else
+            {
+                // NOTE: Only allow this to happen if the file is used by a different process which is error 32
+                // NOTE: https://docs.microsoft.com/en-us/windows/win32/debug/system-error-codes--0-499-
+                DWORD Error = GetLastError();
+                Assert(Error == 32);
+            }
+        }
+
+        if (ReCreatePSO)
+        {
+            // NOTE: ReCreate the PSO
+            switch (Entry->Type)
+            {
+                case VkPipelineEntry_Graphics:
+                {
+                    vk_pipeline_graphics_entry* GraphicsEntry = &Entry->GraphicsEntry;
+
+                    VkShaderModule VsShader = VkPipelineAddShaderRef(Device, FileHandles[0], TempArena, Entry->ShaderRefs[0].FileName,
+                                                                     Entry->ShaderRefs[0].MainName, Entry->ShaderRefs + 0);
+                    VkShaderModule PsShader = VkPipelineAddShaderRef(Device, FileHandles[1], TempArena, Entry->ShaderRefs[1].FileName,
+                                                                     Entry->ShaderRefs[1].MainName, Entry->ShaderRefs + 1);
+    
+                    VkPipelineShaderStageCreateInfo ShaderStages[2] = {};
+                    ShaderStages[0] = VkPipelineShaderStage(VK_SHADER_STAGE_VERTEX_BIT, VsShader, Entry->ShaderRefs[0].MainName);
+                    ShaderStages[1] = VkPipelineShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, PsShader, Entry->ShaderRefs[1].MainName);
+
+                    VkGraphicsPipelineCreateInfo PipelineCreateInfo = GraphicsEntry->PipelineCreateInfo;
+                    PipelineCreateInfo.stageCount = Entry->NumShaders;
+                    PipelineCreateInfo.pStages = ShaderStages;
+                    VkCheckResult(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
+
+                    vkDestroyShaderModule(Device, VsShader, 0);
+                    vkDestroyShaderModule(Device, PsShader, 0);
+                } break;
+
+                case VkPipelineEntry_Compute:
+                {
+                    vk_pipeline_compute_entry* ComputeEntry = &Entry->ComputeEntry;
+                    
+                    VkShaderModule CsShader = VkPipelineAddShaderRef(Device, FileHandles[0], TempArena, Entry->ShaderRefs[0].FileName,
+                                                                     Entry->ShaderRefs[0].MainName, Entry->ShaderRefs + 0);
+                    VkPipelineShaderStageCreateInfo ShaderStageCreateInfo = VkPipelineShaderStage(VK_SHADER_STAGE_COMPUTE_BIT, CsShader,
+                                                                                                  Entry->ShaderRefs[0].MainName);
+
+                    VkComputePipelineCreateInfo PipelineCreateInfo = ComputeEntry->PipelineCreateInfo;
+                    PipelineCreateInfo.stage = ShaderStageCreateInfo;
+                    VkCheckResult(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
+
+                    vkDestroyShaderModule(Device, CsShader, 0);
+                } break;
+
+                default:
+                {
+                    InvalidCodePath;
+                } break;
+            }
+        }
+        else
+        {
+            for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
+            {
+                CloseHandle(FileHandles[ShaderId]);
+            }
+        }
+    }
+}
+
+//
+// NOTE: Graphics Pipeline Builder
+//
+
+inline vk_pipeline_builder VkPipelineBuilderBegin(linear_arena* Arena)
+{
+    vk_pipeline_builder Result = {};
+    Result.Arena = Arena;
+    Result.TempMem = BeginTempMem(Arena);
+
+    // IMPORTANT: We set some max stuff here to make other stuff simpler later
+    Result.MaxNumVertexBindings = 100;
+    Result.VertexBindings = PushArray(Arena, VkVertexInputBindingDescription, Result.MaxNumVertexBindings);
+
+    Result.MaxNumVertexAttributes = 100;
+    Result.VertexAttributes = PushArray(Arena, VkVertexInputAttributeDescription, Result.MaxNumVertexAttributes);
+
+    Result.MaxNumColorAttachments = 10;
+    Result.ColorAttachments = PushArray(Arena, VkPipelineColorBlendAttachmentState, Result.MaxNumColorAttachments);
+
+    // NOTE: Set some default values
+    VkPipelineInputAssemblyAdd(&Result, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE);
+    
+    return Result;
+}
+
+inline void VkPipelineVertexShaderAdd(vk_pipeline_builder* Builder, char* FileName, char* MainName)
+{
+    Builder->VsFileName = FileName;
+    Builder->VsMainName = MainName;
+}
+
+inline void VkPipelineFragmentShaderAdd(vk_pipeline_builder* Builder, char* FileName, char* MainName)
+{
+    Builder->PsFileName = FileName;
+    Builder->PsMainName = MainName;
+}
+
+inline void VkPipelineVertexBindingBegin(vk_pipeline_builder* Builder)
+{
+    Assert(Builder->NumVertexBindings < Builder->MaxNumVertexBindings);
+    
+    VkVertexInputBindingDescription* VertexBinding = Builder->VertexBindings + Builder->NumVertexBindings;
+    VertexBinding->binding = Builder->NumVertexBindings++;
+    VertexBinding->inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    Builder->CurrVertexBindingSize = 0;
+    Builder->CurrVertexLocation = 0;
+}
+
+inline void VkPipelineVertexBindingEnd(vk_pipeline_builder* Builder)
+{
+    u32 CurrVertexBinding = Builder->NumVertexBindings - 1;
+    Builder->VertexBindings[CurrVertexBinding].stride = Builder->CurrVertexBindingSize;
+}
+
+inline void VkPipelineVertexAttributeAdd(vk_pipeline_builder* Builder, VkFormat Format, u32 VertexAttribSize)
+{
+    Assert(Builder->NumVertexAttributes < Builder->MaxNumVertexAttributes);
+    
+    u32 CurrVertexBinding = Builder->NumVertexBindings - 1;
+    VkVertexInputAttributeDescription* VertexAttribute = Builder->VertexAttributes + Builder->NumVertexAttributes++;
+    VertexAttribute->location = Builder->CurrVertexLocation++;
+    VertexAttribute->binding = CurrVertexBinding;
+    VertexAttribute->format = Format;
+    VertexAttribute->offset = Builder->CurrVertexBindingSize;
+
+    Builder->CurrVertexBindingSize += VertexAttribSize;
+}
+
+inline void VkPipelineInputAssemblyAdd(vk_pipeline_builder* Builder, VkPrimitiveTopology Topology, VkBool32 PrimRestart)
+{
+    Builder->InputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    Builder->InputAssembly.topology = Topology;
+    Builder->InputAssembly.primitiveRestartEnable = PrimRestart;
+}
+
+inline void VkPipelineDepthStateAdd(vk_pipeline_builder* Builder, VkBool32 TestEnable, VkBool32 WriteEnable, VkCompareOp CompareOp)
+{
+    Builder->Flags |= VkPipelineFlag_HasDepthStencil;
+    
+    Builder->DepthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    Builder->DepthStencil.depthTestEnable = TestEnable;
+    Builder->DepthStencil.depthWriteEnable = WriteEnable;
+    Builder->DepthStencil.depthCompareOp = CompareOp;
+
+    // NOTE: These are the defaults
+    Builder->DepthStencil.depthBoundsTestEnable = VK_FALSE;
+    Builder->DepthStencil.minDepthBounds = 0;
+    Builder->DepthStencil.maxDepthBounds = 1;
+}
+
+inline void VkPipelineDepthBoundsAdd(vk_pipeline_builder* Builder, f32 Min, f32 Max)
+{
+    Assert((Builder->Flags & VkPipelineFlag_HasDepthStencil) != 0);
+    
+    Builder->DepthStencil.depthBoundsTestEnable = VK_TRUE;
+    Builder->DepthStencil.minDepthBounds = Min;
+    Builder->DepthStencil.maxDepthBounds = Max;
+}
+
+inline void VkPipelineStencilStateAdd(vk_pipeline_builder* Builder, VkStencilOpState Front, VkStencilOpState Back)
+{
+    Builder->Flags |= VkPipelineFlag_HasDepthStencil;
+
+    Builder->DepthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    Builder->DepthStencil.stencilTestEnable = VK_TRUE;
+    Builder->DepthStencil.front = Front;
+    Builder->DepthStencil.back = Back;
+}
+
+inline void VkPipelineColorAttachmentAdd(vk_pipeline_builder* Builder, VkBool32 ColorEnable, VkBlendOp ColorBlend, VkBlendFactor SrcColor,
+                                         VkBlendFactor DstColor, VkBlendOp AlphaBlend, VkBlendFactor SrcAlpha, VkBlendFactor DstAlpha,
+                                         VkColorComponentFlags WriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
+{
+    Assert(Builder->NumColorAttachments < Builder->MaxNumColorAttachments);
+
+    VkPipelineColorBlendAttachmentState* ColorAttachment = Builder->ColorAttachments + Builder->NumColorAttachments++;
+    ColorAttachment->blendEnable = ColorEnable;
+    ColorAttachment->srcColorBlendFactor = SrcColor;
+    ColorAttachment->dstColorBlendFactor = DstColor;
+    ColorAttachment->colorBlendOp = ColorBlend;
+    ColorAttachment->srcAlphaBlendFactor = SrcAlpha;
+    ColorAttachment->dstAlphaBlendFactor = DstAlpha;
+    ColorAttachment->alphaBlendOp = AlphaBlend;
+    ColorAttachment->colorWriteMask = WriteMask;
+}
+
+inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice Device, vk_pipeline_manager* Manager,
+                                         VkRenderPass RenderPass, u32 SubPassId, VkDescriptorSetLayout* Layouts, u32 NumLayouts)
+{
+    vk_pipeline* Result = {};
+    
+    // NOTE: Vertex attribute info
+    VkPipelineVertexInputStateCreateInfo VertexInputStateCreateInfo = {};
+    VertexInputStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VertexInputStateCreateInfo.vertexBindingDescriptionCount = Builder->NumVertexBindings;
+    VertexInputStateCreateInfo.pVertexBindingDescriptions = Builder->VertexBindings;
+    VertexInputStateCreateInfo.vertexAttributeDescriptionCount = Builder->NumVertexAttributes;
+    VertexInputStateCreateInfo.pVertexAttributeDescriptions = Builder->VertexAttributes;
+    
+    // NOTE: Specify view port info
+    VkPipelineViewportStateCreateInfo ViewPortStateCreateInfo = {};
+    ViewPortStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewPortStateCreateInfo.viewportCount = 1;
+    ViewPortStateCreateInfo.pViewports = 0;
+    ViewPortStateCreateInfo.scissorCount = 1;
+    ViewPortStateCreateInfo.pScissors = 0;
+
+    // TODO: This should be specified but make more pipelines and see how to break it up
+    // NOTE: Specify rasterization flags
+    VkPipelineRasterizationStateCreateInfo RasterizationStateCreateInfo = {};
+    RasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
+    RasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
+    RasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
+    RasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
+    RasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
+    RasterizationStateCreateInfo.depthBiasClamp = 0.0f;
+    RasterizationStateCreateInfo.depthBiasSlopeFactor = 0.0f;
+    RasterizationStateCreateInfo.lineWidth = 1.0f;
+
+    // TODO: This should be specified but make more pipeliens and see how to break it up
+    // NOTE: Set the multi sampling state
+    VkPipelineMultisampleStateCreateInfo MultiSampleStateCreateInfo = {};
+    MultiSampleStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultiSampleStateCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MultiSampleStateCreateInfo.sampleShadingEnable = VK_FALSE;
+    MultiSampleStateCreateInfo.minSampleShading = 1.0f;
+    MultiSampleStateCreateInfo.pSampleMask = 0;
+    MultiSampleStateCreateInfo.alphaToCoverageEnable = VK_FALSE;
+    MultiSampleStateCreateInfo.alphaToOneEnable = VK_FALSE;
+
+    // TODO: This might need to be configurable
+    // NOTE: Set the blending state
+    VkPipelineColorBlendStateCreateInfo ColorBlendStateCreateInfo = {};
+    ColorBlendStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    ColorBlendStateCreateInfo.logicOpEnable = VK_FALSE;
+    ColorBlendStateCreateInfo.logicOp = VK_LOGIC_OP_COPY;
+    ColorBlendStateCreateInfo.attachmentCount = Builder->NumColorAttachments;
+    ColorBlendStateCreateInfo.pAttachments = Builder->ColorAttachments;
+    ColorBlendStateCreateInfo.blendConstants[0] = 0.0f;
+    ColorBlendStateCreateInfo.blendConstants[1] = 0.0f;
+    ColorBlendStateCreateInfo.blendConstants[2] = 0.0f;
+    ColorBlendStateCreateInfo.blendConstants[3] = 0.0f;
+
+    // NOTE: Spec dynamic state
+    VkDynamicState DynamicStates[2] = {};
+    DynamicStates[0] = VK_DYNAMIC_STATE_VIEWPORT;
+    DynamicStates[1] = VK_DYNAMIC_STATE_SCISSOR;
+
+    VkPipelineDynamicStateCreateInfo DynamicStateCreateInfo = {};
+    DynamicStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicStateCreateInfo.dynamicStateCount = ArrayCount(DynamicStates);
+    DynamicStateCreateInfo.pDynamicStates = DynamicStates;
+                
+    VkPipelineLayoutCreateInfo LayoutCreateInfo = {};
+    LayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    LayoutCreateInfo.setLayoutCount = NumLayouts;
+    LayoutCreateInfo.pSetLayouts = Layouts;
+            
+    VkGraphicsPipelineCreateInfo PipelineCreateInfo = {};
+    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCreateInfo.pVertexInputState = &VertexInputStateCreateInfo;
+    PipelineCreateInfo.pInputAssemblyState = &Builder->InputAssembly;
+    PipelineCreateInfo.pViewportState = &ViewPortStateCreateInfo;
+    PipelineCreateInfo.pRasterizationState = &RasterizationStateCreateInfo;
+    if (Builder->Flags & VkPipelineFlag_HasDepthStencil)
+    {
+        PipelineCreateInfo.pDepthStencilState = &Builder->DepthStencil;
+    }
+    PipelineCreateInfo.pMultisampleState = &MultiSampleStateCreateInfo;
+    PipelineCreateInfo.pColorBlendState = &ColorBlendStateCreateInfo;
+    PipelineCreateInfo.pDynamicState = &DynamicStateCreateInfo;
+    PipelineCreateInfo.renderPass = RenderPass;
+    PipelineCreateInfo.subpass = SubPassId;
+    PipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+    PipelineCreateInfo.basePipelineIndex = -1;
+
+    Result = VkPipelineVsPsCreate(Device, Manager, Builder->Arena, Builder->VsFileName, Builder->VsMainName, Builder->PsFileName,
+                                  Builder->PsMainName, &LayoutCreateInfo, &PipelineCreateInfo);
+    
+    EndTempMem(Builder->TempMem);
+
+    return Result;
 }
 
 //
