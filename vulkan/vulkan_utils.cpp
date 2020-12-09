@@ -11,6 +11,26 @@ internal void VkCheckResult(VkResult Result)
     }
 }
 
+inline VkClearValue VkClearColorCreate(f32 R, f32 G, f32 B, f32 A)
+{
+    VkClearValue Result = {};
+    Result.color.float32[0] = R;
+    Result.color.float32[1] = G;
+    Result.color.float32[2] = B;
+    Result.color.float32[3] = A;
+
+    return Result;
+}
+
+inline VkClearValue VkClearDepthStencilCreate(f32 Depth, u32 Stencil)
+{
+    VkClearValue Result = {};
+    Result.depthStencil.depth = Depth;
+    Result.depthStencil.stencil = Stencil;
+
+    return Result;
+}
+
 //
 // NOTE: Coordinate System Functions
 //
@@ -254,8 +274,6 @@ inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Wid
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.usage = Usage;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    ImageCreateInfo.queueFamilyIndexCount = 0;
-    ImageCreateInfo.pQueueFamilyIndices = 0;
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, OutImage));
 
@@ -280,6 +298,123 @@ inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Wid
     ImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
     ImgViewCreateInfo.subresourceRange.layerCount = 1;
     VkCheckResult(vkCreateImageView(Device, &ImgViewCreateInfo, 0, OutImageView));
+}
+
+inline vk_image VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Width, u32 Height,
+                                VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask)
+{
+    vk_image Result = {};
+    VkImage2dCreate(Device, Arena, Width, Height, Format, Usage, AspectMask, &Result.Image, &Result.View);
+
+    return Result;
+}
+
+inline vk_image VkCubeMapCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format,
+                                VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, u32 MipLevels = 1)
+{
+    vk_image Result = {};
+    
+    VkImageCreateInfo ImageCreateInfo = {};
+    ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageCreateInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+    ImageCreateInfo.format = Format;
+    ImageCreateInfo.extent.width = Width;
+    ImageCreateInfo.extent.height = Height;
+    ImageCreateInfo.extent.depth = 1;
+    ImageCreateInfo.mipLevels = MipLevels;
+    ImageCreateInfo.arrayLayers = 6;
+    ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageCreateInfo.usage = Usage;
+    ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, &Result.Image));
+
+    VkMemoryRequirements ImageMemRequirements;
+    vkGetImageMemoryRequirements(Device, Result.Image, &ImageMemRequirements);
+    vk_gpu_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
+    VkCheckResult(vkBindImageMemory(Device, Result.Image, *MemPtr.Memory, MemPtr.Offset));
+
+    // NOTE: Create image view
+    VkImageViewCreateInfo ImgViewCreateInfo = {};
+    ImgViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ImgViewCreateInfo.image = Result.Image;
+    ImgViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+    ImgViewCreateInfo.format = Format;
+    ImgViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImgViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImgViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImgViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    ImgViewCreateInfo.subresourceRange.aspectMask = AspectMask;
+    ImgViewCreateInfo.subresourceRange.baseMipLevel = 0;
+    ImgViewCreateInfo.subresourceRange.levelCount = 1;
+    ImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+    ImgViewCreateInfo.subresourceRange.layerCount = 6;
+    VkCheckResult(vkCreateImageView(Device, &ImgViewCreateInfo, 0, &Result.View));
+
+    return Result;
+}
+
+inline void VkImageFree(VkDevice Device, vk_image Image)
+{
+    vkDestroyImageView(Device, Image.View, 0);
+    vkDestroyImage(Device, Image.Image, 0);
+}
+
+//
+// NOTE: Sampler Helpers
+//
+
+inline VkSampler VkSamplerCreate(VkDevice Device, VkFilter Filter, VkSamplerAddressMode AddressMode, f32 Ansitropy)
+{
+    VkSamplerCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    CreateInfo.magFilter = Filter;
+    CreateInfo.minFilter = Filter;
+    CreateInfo.addressModeU = AddressMode;
+    CreateInfo.addressModeV = AddressMode;
+    CreateInfo.addressModeW = AddressMode;
+    CreateInfo.anisotropyEnable = Ansitropy > 0.0f ? VK_TRUE : VK_FALSE;
+    CreateInfo.maxAnisotropy = Ansitropy;
+    CreateInfo.compareEnable = VK_FALSE;
+    CreateInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    CreateInfo.mipLodBias = 0;
+    CreateInfo.minLod = 0;
+    CreateInfo.maxLod = 0;
+    CreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    CreateInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler Result = {};
+    VkCheckResult(vkCreateSampler(Device, &CreateInfo, 0, &Result));
+    
+    return Result;
+}
+
+inline VkSampler VkSamplerMipMapCreate(VkDevice Device, VkFilter Filter, VkSamplerAddressMode AddressMode, f32 Ansitropy,
+                                       VkSamplerMipmapMode MipMapMode, f32 MipLodBias, f32 MinLod, f32 MaxLod)
+{
+    VkSamplerCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    CreateInfo.magFilter = Filter;
+    CreateInfo.minFilter = Filter;
+    CreateInfo.addressModeU = AddressMode;
+    CreateInfo.addressModeV = AddressMode;
+    CreateInfo.addressModeW = AddressMode;
+    CreateInfo.anisotropyEnable = Ansitropy > 0.0f ? VK_TRUE : VK_FALSE;
+    CreateInfo.maxAnisotropy = Ansitropy;
+    CreateInfo.compareEnable = VK_FALSE;
+    CreateInfo.mipmapMode = MipMapMode;
+    CreateInfo.mipLodBias = MipLodBias;
+    CreateInfo.minLod = MinLod;
+    CreateInfo.maxLod = MaxLod;
+    CreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    CreateInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler Result = {};
+    VkCheckResult(vkCreateSampler(Device, &CreateInfo, 0, &Result));
+    
+    return Result;
 }
 
 //
@@ -379,16 +514,16 @@ inline vk_descriptor_manager VkDescriptorManagerCreate(linear_arena* Arena, u32 
     return Result;
 }
 
-inline void VkDescriptorBufferWrite(vk_descriptor_manager* Updater, VkDescriptorSet Set, u32 Binding,
+inline void VkDescriptorBufferWrite(vk_descriptor_manager* Manager, VkDescriptorSet Set, u32 Binding,
                                     VkDescriptorType DescType, VkBuffer Buffer)
 {
-    VkDescriptorBufferInfo* BufferInfo = PushStruct(&Updater->Arena, VkDescriptorBufferInfo);
+    VkDescriptorBufferInfo* BufferInfo = PushStruct(&Manager->Arena, VkDescriptorBufferInfo);
     BufferInfo->buffer = Buffer;
     BufferInfo->offset = 0;
     BufferInfo->range = VK_WHOLE_SIZE;
 
-    Assert(Updater->NumWrites < Updater->MaxNumWrites);
-    VkWriteDescriptorSet* DsWrite = Updater->WriteArray + Updater->NumWrites++;
+    Assert(Manager->NumWrites < Manager->MaxNumWrites);
+    VkWriteDescriptorSet* DsWrite = Manager->WriteArray + Manager->NumWrites++;
     *DsWrite = {};
     DsWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     DsWrite->dstSet = Set;
@@ -398,17 +533,31 @@ inline void VkDescriptorBufferWrite(vk_descriptor_manager* Updater, VkDescriptor
     DsWrite->pBufferInfo = BufferInfo;
 }
 
-inline void VkDescriptorImageWrite(vk_descriptor_manager* Updater, VkDescriptorSet Set, u32 Binding,
+inline void VkDescriptorTexelBufferWrite(vk_descriptor_manager* Manager, VkDescriptorSet Set, u32 Binding,
+                                         VkDescriptorType DescType, VkBufferView* BufferView)
+{
+    Assert(Manager->NumWrites < Manager->MaxNumWrites);
+    VkWriteDescriptorSet* DsWrite = Manager->WriteArray + Manager->NumWrites++;
+    *DsWrite = {};
+    DsWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    DsWrite->dstSet = Set;
+    DsWrite->dstBinding = Binding;
+    DsWrite->descriptorCount = 1;
+    DsWrite->descriptorType = DescType;
+    DsWrite->pTexelBufferView = BufferView;
+}
+
+inline void VkDescriptorImageWrite(vk_descriptor_manager* Manager, VkDescriptorSet Set, u32 Binding,
                                    VkDescriptorType DescType, VkImageView ImageView, VkSampler Sampler,
                                    VkImageLayout ImageLayout)
 {
-    VkDescriptorImageInfo* ImageInfo = PushStruct(&Updater->Arena, VkDescriptorImageInfo);
+    VkDescriptorImageInfo* ImageInfo = PushStruct(&Manager->Arena, VkDescriptorImageInfo);
     ImageInfo->sampler = Sampler;
     ImageInfo->imageView = ImageView;
     ImageInfo->imageLayout = ImageLayout;
 
-    Assert(Updater->NumWrites < Updater->MaxNumWrites);
-    VkWriteDescriptorSet* DsWrite = Updater->WriteArray + Updater->NumWrites++;
+    Assert(Manager->NumWrites < Manager->MaxNumWrites);
+    VkWriteDescriptorSet* DsWrite = Manager->WriteArray + Manager->NumWrites++;
     *DsWrite = {};
     DsWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     DsWrite->dstSet = Set;
@@ -418,12 +567,12 @@ inline void VkDescriptorImageWrite(vk_descriptor_manager* Updater, VkDescriptorS
     DsWrite->pImageInfo = ImageInfo;
 }
 
-inline void VkDescriptorManagerFlush(VkDevice Device, vk_descriptor_manager* Updater)
+inline void VkDescriptorManagerFlush(VkDevice Device, vk_descriptor_manager* Manager)
 {
-    vkUpdateDescriptorSets(Device, Updater->NumWrites, Updater->WriteArray, 0, 0);
+    vkUpdateDescriptorSets(Device, Manager->NumWrites, Manager->WriteArray, 0, 0);
 
-    Updater->NumWrites = 0;
-    Updater->Arena.Used = sizeof(VkWriteDescriptorSet)*Updater->MaxNumWrites;
+    Manager->NumWrites = 0;
+    Manager->Arena.Used = sizeof(VkWriteDescriptorSet)*Manager->MaxNumWrites;
 }
 
 //
@@ -440,6 +589,12 @@ inline vk_render_pass_builder VkRenderPassBuilderBegin(linear_arena* Arena)
     // IMPORTANT: These arrays should be larger if these sizes aren't enough
     Result.MaxNumAttachments = 10;
     Result.Attachments = PushArray(Arena, VkAttachmentDescription, Result.MaxNumAttachments);
+
+    Result.MaxNumDependencies = 10;
+    Result.Dependencies = PushArray(Arena, VkSubpassDependency, Result.MaxNumDependencies);
+
+    Result.MaxNumInputAttachmentRefs = 100;
+    Result.InputAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumInputAttachmentRefs);
 
     Result.MaxNumColorAttachmentRefs = 100;
     Result.ColorAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumColorAttachmentRefs);
@@ -481,6 +636,21 @@ inline void VkRenderPassSubPassBegin(vk_render_pass_builder* Builder, VkPipeline
     *SubPass = {};
     SubPass->pipelineBindPoint = BindPoint;
     SubPass->pColorAttachments = Builder->ColorAttachmentRefs + Builder->NumColorAttachmentRefs;
+    SubPass->pInputAttachments = Builder->InputAttachmentRefs + Builder->NumInputAttachmentRefs;
+}
+
+inline void VkRenderPassInputRefAdd(vk_render_pass_builder* Builder, u32 AttachmentId, VkImageLayout Layout)
+{
+    Assert(Builder->NumInputAttachmentRefs < Builder->MaxNumInputAttachmentRefs);
+    Assert(AttachmentId < Builder->NumAttachments);
+
+    VkAttachmentReference* Reference = Builder->InputAttachmentRefs + Builder->NumInputAttachmentRefs++;
+    *Reference = {};
+    Reference->attachment = AttachmentId;
+    Reference->layout = Layout;
+    
+    VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
+    SubPass->inputAttachmentCount += 1;
 }
 
 inline void VkRenderPassColorRefAdd(vk_render_pass_builder* Builder, u32 AttachmentId, VkImageLayout Layout)
@@ -516,6 +686,22 @@ inline void VkRenderPassSubPassEnd(vk_render_pass_builder* Builder)
     Builder->NumSubPasses++;
 }
 
+inline void VkRenderPassDependency(vk_render_pass_builder* Builder, VkPipelineStageFlags SrcStageFlags,
+                                   VkPipelineStageFlags DstStageFlags, VkAccessFlags SrcAccessMask, VkAccessFlags DstAccessMask,
+                                   VkDependencyFlags DependencyFlags)
+{
+    Assert(Builder->NumDependencies < Builder->MaxNumDependencies);
+
+    VkSubpassDependency* Dependency = Builder->Dependencies + Builder->NumDependencies++;
+    Dependency->srcSubpass = Builder->NumSubPasses - 1;
+    Dependency->dstSubpass = Builder->NumSubPasses;
+    Dependency->srcStageMask = SrcStageFlags;
+    Dependency->dstStageMask = DstStageFlags;
+    Dependency->srcAccessMask = SrcAccessMask;
+    Dependency->dstAccessMask = DstAccessMask;
+    Dependency->dependencyFlags = DependencyFlags;
+}
+
 inline VkRenderPass VkRenderPassBuilderEnd(vk_render_pass_builder* Builder, VkDevice Device)
 {
     VkRenderPass Result = {};
@@ -526,6 +712,8 @@ inline VkRenderPass VkRenderPassBuilderEnd(vk_render_pass_builder* Builder, VkDe
     RenderPassCreateInfo.pAttachments = Builder->Attachments;
     RenderPassCreateInfo.subpassCount = Builder->NumSubPasses;
     RenderPassCreateInfo.pSubpasses = Builder->SubPasses;
+    RenderPassCreateInfo.dependencyCount = Builder->NumDependencies;
+    RenderPassCreateInfo.pDependencies = Builder->Dependencies;
     VkCheckResult(vkCreateRenderPass(Device, &RenderPassCreateInfo, 0, &Result));
 
     EndTempMem(Builder->TempMem);
@@ -537,7 +725,7 @@ inline VkRenderPass VkRenderPassBuilderEnd(vk_render_pass_builder* Builder, VkDe
 // NOTE: Barrier Manager
 //
 
-inline barrier_mask BarrierMask(VkAccessFlagBits AccessMask, VkPipelineStageFlags StageMask)
+inline barrier_mask BarrierMask(VkAccessFlags AccessMask, VkPipelineStageFlags StageMask)
 {
     barrier_mask Result = {};
     Result.AccessMask = AccessMask;
@@ -550,6 +738,9 @@ inline vk_barrier_manager VkBarrierManagerCreate(linear_arena* Arena, u32 MaxNum
 {
     vk_barrier_manager Result = {};
 
+    Result.MaxNumMemoryBarriers = MaxNumBarriers;
+    Result.MemoryBarrierArray = PushArray(Arena, VkMemoryBarrier, MaxNumBarriers);
+
     Result.MaxNumImageBarriers = MaxNumBarriers;
     Result.ImageBarrierArray = PushArray(Arena, VkImageMemoryBarrier, MaxNumBarriers);
 
@@ -559,11 +750,25 @@ inline vk_barrier_manager VkBarrierManagerCreate(linear_arena* Arena, u32 MaxNum
     return Result;
 }
 
-inline void VkBarrierBufferAdd(vk_barrier_manager* Batcher, VkAccessFlagBits InputAccessMask, VkPipelineStageFlags InputStageMask,
-                               VkAccessFlagBits OutputAccessMask, VkPipelineStageFlags OutputStageMask, VkBuffer Buffer)
+inline void VkBarrierMemoryAdd(vk_barrier_manager* Manager, VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask,
+                               VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask)
 {
-    Assert(Batcher->NumBufferBarriers < Batcher->MaxNumBufferBarriers);
-    VkBufferMemoryBarrier* Barrier = Batcher->BufferBarrierArray + Batcher->NumBufferBarriers++;
+    Assert(Manager->NumMemoryBarriers < Manager->MaxNumMemoryBarriers);
+    VkMemoryBarrier* Barrier = Manager->MemoryBarrierArray + Manager->NumMemoryBarriers++;
+    
+    Barrier->sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    Barrier->srcAccessMask = InputAccessMask;
+    Barrier->dstAccessMask = OutputAccessMask;
+
+    Manager->SrcStageFlags |= InputStageMask;
+    Manager->DstStageFlags |= OutputStageMask;
+}
+
+inline void VkBarrierBufferAdd(vk_barrier_manager* Manager, VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask,
+                               VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask, VkBuffer Buffer)
+{
+    Assert(Manager->NumBufferBarriers < Manager->MaxNumBufferBarriers);
+    VkBufferMemoryBarrier* Barrier = Manager->BufferBarrierArray + Manager->NumBufferBarriers++;
     
     Barrier->sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     Barrier->srcAccessMask = InputAccessMask;
@@ -574,21 +779,21 @@ inline void VkBarrierBufferAdd(vk_barrier_manager* Batcher, VkAccessFlagBits Inp
     Barrier->offset = 0;
     Barrier->size = VK_WHOLE_SIZE;
 
-    Batcher->SrcStageFlags |= InputStageMask;
-    Batcher->DstStageFlags |= OutputStageMask;
+    Manager->SrcStageFlags |= InputStageMask;
+    Manager->DstStageFlags |= OutputStageMask;
 }
 
-inline void VkBarrierBufferAdd(vk_barrier_manager* Batcher, barrier_mask InputMask, barrier_mask OutputMask, VkBuffer Buffer)
+inline void VkBarrierBufferAdd(vk_barrier_manager* Manager, barrier_mask InputMask, barrier_mask OutputMask, VkBuffer Buffer)
 {
-    VkBarrierBufferAdd(Batcher, InputMask.AccessMask, InputMask.StageMask, OutputMask.AccessMask, OutputMask.StageMask, Buffer);
+    VkBarrierBufferAdd(Manager, InputMask.AccessMask, InputMask.StageMask, OutputMask.AccessMask, OutputMask.StageMask, Buffer);
 }
 
-inline void VkBarrierImageAdd(vk_barrier_manager* Batcher, VkAccessFlagBits InputAccessMask, VkPipelineStageFlags InputStageMask,
-                              VkImageLayout InputLayout, VkAccessFlagBits OutputAccessMask, VkPipelineStageFlags OutputStageMask,
+inline void VkBarrierImageAdd(vk_barrier_manager* Manager, VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask,
+                              VkImageLayout InputLayout, VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask,
                               VkImageLayout OutputLayout, VkImageAspectFlags AspectFlags, VkImage Image)
 {
-    Assert(Batcher->NumImageBarriers < Batcher->MaxNumImageBarriers);
-    VkImageMemoryBarrier* Barrier = Batcher->ImageBarrierArray + Batcher->NumImageBarriers++;
+    Assert(Manager->NumImageBarriers < Manager->MaxNumImageBarriers);
+    VkImageMemoryBarrier* Barrier = Manager->ImageBarrierArray + Manager->NumImageBarriers++;
 
     Barrier->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     Barrier->srcAccessMask = InputAccessMask;
@@ -604,32 +809,44 @@ inline void VkBarrierImageAdd(vk_barrier_manager* Batcher, VkAccessFlagBits Inpu
     Barrier->subresourceRange.baseArrayLayer = 0;
     Barrier->subresourceRange.layerCount = 1;
 
-    Batcher->SrcStageFlags |= InputStageMask;
-    Batcher->DstStageFlags |= OutputStageMask;
+    Manager->SrcStageFlags |= InputStageMask;
+    Manager->DstStageFlags |= OutputStageMask;
 }
 
-inline void VkBarrierImageAdd(vk_barrier_manager* Batcher, barrier_mask InputMask, VkImageLayout InputLayout, barrier_mask OutputMask,
+inline void VkBarrierImageAdd(vk_barrier_manager* Manager, barrier_mask InputMask, VkImageLayout InputLayout, barrier_mask OutputMask,
                               VkImageLayout OutputLayout, VkImageAspectFlags AspectFlags,
                               VkImage Image)
 {
-    VkBarrierImageAdd(Batcher, InputMask.AccessMask, InputMask.StageMask, InputLayout, OutputMask.AccessMask, OutputMask.StageMask,
+    VkBarrierImageAdd(Manager, InputMask.AccessMask, InputMask.StageMask, InputLayout, OutputMask.AccessMask, OutputMask.StageMask,
                       OutputLayout, AspectFlags, Image);
 }
 
-inline void VkBarrierManagerFlush(vk_barrier_manager* Batcher, VkCommandBuffer CmdBuffer)
+inline void VkBarrierManagerFlush(vk_barrier_manager* Manager, VkCommandBuffer CmdBuffer)
 {
-    vkCmdPipelineBarrier(CmdBuffer, Batcher->SrcStageFlags, Batcher->DstStageFlags, VK_DEPENDENCY_BY_REGION_BIT, 0, 0,
-                         Batcher->NumBufferBarriers, Batcher->BufferBarrierArray, Batcher->NumImageBarriers, Batcher->ImageBarrierArray);
+    vkCmdPipelineBarrier(CmdBuffer, Manager->SrcStageFlags, Manager->DstStageFlags, VK_DEPENDENCY_BY_REGION_BIT, Manager->NumMemoryBarriers,
+                         Manager->MemoryBarrierArray, Manager->NumBufferBarriers, Manager->BufferBarrierArray, Manager->NumImageBarriers,
+                         Manager->ImageBarrierArray);
 
-    Batcher->NumBufferBarriers = 0;
-    Batcher->NumImageBarriers = 0;
-    Batcher->SrcStageFlags = 0;
-    Batcher->DstStageFlags = 0;
+    Manager->NumMemoryBarriers = 0;
+    Manager->NumBufferBarriers = 0;
+    Manager->NumImageBarriers = 0;
+    Manager->SrcStageFlags = 0;
+    Manager->DstStageFlags = 0;
 }
 
 //
 // NOTE: Pipeline Manager
 //
+
+inline vk_pipeline_manager VkPipelineManagerCreate(linear_arena* Arena)
+{
+    vk_pipeline_manager Result = {};
+    Result.Arena = LinearSubArena(Arena, MegaBytes(5));
+    Result.MaxNumPipelines = 100; // TODO: This is hardcoded for now
+    Result.PipelineArray = PushArray(&Result.Arena, vk_pipeline_entry, Result.MaxNumPipelines);
+
+    return Result;
+}
 
 inline VkPipelineShaderStageCreateInfo VkPipelineShaderStage(VkShaderStageFlagBits Stage, VkShaderModule Module, char* MainName)
 {
@@ -642,11 +859,29 @@ inline VkPipelineShaderStageCreateInfo VkPipelineShaderStage(VkShaderStageFlagBi
     return Result;
 }
 
-inline VkShaderModule VkPipelineAddShaderRef(VkDevice Device, HANDLE File, linear_arena* TempArena, char* FileName, char* MainName,
-                                             vk_shader_ref* Ref)
+inline void VkPipelineAddShaderRef(vk_pipeline_manager* Manager, vk_pipeline_entry* Entry, char* FileName, char* MainName,
+                                   VkShaderStageFlagBits Stage)
 {
-    temp_mem TempMem = BeginTempMem(TempArena);
+    Assert(Entry->NumShaders < VK_MAX_PIPELINE_STAGES);
+    vk_shader_ref* ShaderRef = Entry->ShaderRefs + Entry->NumShaders++;
     
+    // NOTE: Copy strings since our DLL might get swapped and create all shaders
+    ShaderRef->FileName = PushString(&Manager->Arena, FileName);
+    ShaderRef->MainName = PushString(&Manager->Arena, MainName);
+    ShaderRef->Stage = Stage;
+}
+
+inline void VkPipelineAddShaderRef(vk_pipeline_manager* Manager, vk_pipeline_entry* Entry, vk_pipeline_builder_shader BuilderShader)
+{
+    VkPipelineAddShaderRef(Manager, Entry, BuilderShader.FileName, BuilderShader.MainName, BuilderShader.Stage);
+}
+
+inline VkShaderModule VkPipelineGetShaderModule(VkDevice Device, HANDLE File, linear_arena* TempArena, vk_shader_ref* ShaderRef)
+{
+    VkShaderModule Result = {};
+    
+    temp_mem TempMem = BeginTempMem(TempArena);
+
     // NOTE: Get File code
     LARGE_INTEGER CodeSize = {};
     if (!GetFileSizeEx(File, &CodeSize))
@@ -663,69 +898,67 @@ inline VkShaderModule VkPipelineAddShaderRef(VkDevice Device, HANDLE File, linea
         InvalidCodePath;
     }
 
-    // NOTE: Populate Ref
-    Ref->FileName = FileName;
-    Ref->MainName = MainName;
-    if (!GetFileTime(File, 0, 0, &Ref->ModifiedTime))
+    if (!GetFileTime(File, 0, 0, &ShaderRef->ModifiedTime))
     {
         DWORD Error = GetLastError();
         InvalidCodePath;
     }
     
-    CloseHandle(File);
-    
     VkShaderModuleCreateInfo ShaderModuleCreateInfo = {};
     ShaderModuleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     ShaderModuleCreateInfo.codeSize = CodeSize.LowPart;
     ShaderModuleCreateInfo.pCode = Code;
-
-    VkShaderModule Result;
     VkCheckResult(vkCreateShaderModule(Device, &ShaderModuleCreateInfo, 0, &Result));
+
     EndTempMem(TempMem);
-    
+
     return Result;
 }
 
-inline VkShaderModule VkPipelineAddShaderRef(VkDevice Device, linear_arena* TempArena, char* FileName, char* MainName, vk_shader_ref* Ref)
+inline VkShaderModule VkPipelineGetShaderModule(VkDevice Device, linear_arena* TempArena, vk_shader_ref* ShaderRef)
 {
-    HANDLE File = CreateFileA(FileName, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+    HANDLE File = CreateFileA(ShaderRef->FileName, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (File == INVALID_HANDLE_VALUE)
     {
         DWORD Error = GetLastError();
         InvalidCodePath;
     }
 
-    VkShaderModule Result = VkPipelineAddShaderRef(Device, File, TempArena, FileName, MainName, Ref);
-    return Result;
-}
-
-inline vk_pipeline_manager VkPipelineManagerCreate(linear_arena* Arena)
-{
-    vk_pipeline_manager Result = {};
-    Result.MaxNumPipelines = 100; // TODO: This is hardcoded for now
-    Result.PipelineArray = PushArray(Arena, vk_pipeline_entry, Result.MaxNumPipelines);
+    VkShaderModule Result = VkPipelineGetShaderModule(Device, File, TempArena, ShaderRef);
+    CloseHandle(File);
 
     return Result;
 }
 
-inline vk_pipeline* VkPipelineCsCreate(VkDevice Device, vk_pipeline_manager* Manager, linear_arena* TempArena, char* FileName,
-                                       char* MainName, VkDescriptorSetLayout* Layouts, u32 NumLayouts)
+inline vk_pipeline* VkPipelineComputeCreate(VkDevice Device, vk_pipeline_manager* Manager, linear_arena* TempArena, char* FileName,
+                                            char* MainName, VkDescriptorSetLayout* Layouts, u32 NumLayouts, u32 PushConstantSize = 0)
 {
     Assert(Manager->NumPipelines < Manager->MaxNumPipelines);
     vk_pipeline_entry* Entry = Manager->PipelineArray + Manager->NumPipelines++;
     *Entry = {};
     Entry->Type = VkPipelineEntry_Compute;
-
+    VkPipelineAddShaderRef(Manager, Entry, FileName, MainName, VK_SHADER_STAGE_COMPUTE_BIT);
+    
     // NOTE: Setup pipeline create infos and create pipeline
     {
         vk_pipeline_compute_entry* ComputeEntry = &Entry->ComputeEntry;
-        VkShaderModule CsShader = VkPipelineAddShaderRef(Device, TempArena, FileName, MainName, Entry->ShaderRefs + Entry->NumShaders++);
+        VkShaderModule CsShader = VkPipelineGetShaderModule(Device, TempArena, Entry->ShaderRefs + 0);
         VkPipelineShaderStageCreateInfo ShaderStageCreateInfo = VkPipelineShaderStage(VK_SHADER_STAGE_COMPUTE_BIT, CsShader, MainName);
 
+        VkPushConstantRange PushConstantRange = {};
+        PushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        PushConstantRange.offset = 0;
+        PushConstantRange.size = PushConstantSize;
+        
         VkPipelineLayoutCreateInfo LayoutCreateInfo = {};
         LayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         LayoutCreateInfo.setLayoutCount = NumLayouts;
         LayoutCreateInfo.pSetLayouts = Layouts;
+        if (PushConstantSize > 0)
+        {
+            LayoutCreateInfo.pushConstantRangeCount = 1;
+            LayoutCreateInfo.pPushConstantRanges = &PushConstantRange;
+        }
         VkCheckResult(vkCreatePipelineLayout(Device, &LayoutCreateInfo, 0, &Entry->Pipeline.Layout));
 
         ComputeEntry->PipelineCreateInfo = {};
@@ -742,9 +975,9 @@ inline vk_pipeline* VkPipelineCsCreate(VkDevice Device, vk_pipeline_manager* Man
     return &Entry->Pipeline;
 }
 
-inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* Manager, linear_arena* Arena, char* VsFileName,
-                                         char* VsMainName, char* PsFileName, char* PsMainName,
-                                         VkPipelineLayoutCreateInfo* LayoutCreateInfo, VkGraphicsPipelineCreateInfo* PipelineCreateInfo)
+inline vk_pipeline* VkPipelineGraphicsCreate(VkDevice Device, vk_pipeline_manager* Manager, linear_arena* TempArena,
+                                             vk_pipeline_builder_shader* Shaders, u32 NumShaders,
+                                             VkPipelineLayoutCreateInfo* LayoutCreateInfo, VkGraphicsPipelineCreateInfo* PipelineCreateInfo)
 {
     Assert(Manager->NumPipelines < Manager->MaxNumPipelines);
     vk_pipeline_entry* Entry = Manager->PipelineArray + Manager->NumPipelines++;
@@ -755,20 +988,20 @@ inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* M
     {
         vk_pipeline_graphics_entry* GraphicsEntry = &Entry->GraphicsEntry;
 
-        // NOTE: Copy all pipeline create infos
+        // NOTE: Copy all pipeline create infos into managers arena
         {
             GraphicsEntry->VertexInputState = *PipelineCreateInfo->pVertexInputState;
             {
                 if (GraphicsEntry->VertexInputState.vertexBindingDescriptionCount > 0)
                 {
-                    GraphicsEntry->VertBindings = PushArray(Arena, VkVertexInputBindingDescription, GraphicsEntry->VertexInputState.vertexBindingDescriptionCount);
+                    GraphicsEntry->VertBindings = PushArray(&Manager->Arena, VkVertexInputBindingDescription, GraphicsEntry->VertexInputState.vertexBindingDescriptionCount);
                     Copy(GraphicsEntry->VertexInputState.pVertexBindingDescriptions, GraphicsEntry->VertBindings, sizeof(VkVertexInputBindingDescription)*GraphicsEntry->VertexInputState.vertexBindingDescriptionCount);
                     GraphicsEntry->VertexInputState.pVertexBindingDescriptions = GraphicsEntry->VertBindings;
                 }
 
                 if (GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount > 0)
                 {
-                    GraphicsEntry->VertAttributes = PushArray(Arena, VkVertexInputAttributeDescription, GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount);
+                    GraphicsEntry->VertAttributes = PushArray(&Manager->Arena, VkVertexInputAttributeDescription, GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount);
                     Copy(GraphicsEntry->VertexInputState.pVertexAttributeDescriptions, GraphicsEntry->VertAttributes, sizeof(VkVertexInputAttributeDescription)*GraphicsEntry->VertexInputState.vertexAttributeDescriptionCount);
                     GraphicsEntry->VertexInputState.pVertexAttributeDescriptions = GraphicsEntry->VertAttributes;
                 }
@@ -780,14 +1013,14 @@ inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* M
             {
                 if (GraphicsEntry->ViewportState.pViewports)
                 {
-                    GraphicsEntry->ViewPorts = PushArray(Arena, VkViewport, GraphicsEntry->ViewportState.viewportCount);
+                    GraphicsEntry->ViewPorts = PushArray(&Manager->Arena, VkViewport, GraphicsEntry->ViewportState.viewportCount);
                     Copy(GraphicsEntry->ViewportState.pViewports, GraphicsEntry->ViewPorts, sizeof(VkViewport)*GraphicsEntry->ViewportState.viewportCount);
                     GraphicsEntry->ViewportState.pViewports = GraphicsEntry->ViewPorts;
                 }
 
                 if (GraphicsEntry->ViewportState.pScissors)
                 {
-                    GraphicsEntry->Scissors = PushArray(Arena, VkRect2D, GraphicsEntry->ViewportState.scissorCount);
+                    GraphicsEntry->Scissors = PushArray(&Manager->Arena, VkRect2D, GraphicsEntry->ViewportState.scissorCount);
                     Copy(GraphicsEntry->ViewportState.pScissors, GraphicsEntry->Scissors, sizeof(VkRect2D)*GraphicsEntry->ViewportState.scissorCount);
                     GraphicsEntry->ViewportState.pScissors = GraphicsEntry->Scissors;
                 }
@@ -799,7 +1032,7 @@ inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* M
             GraphicsEntry->ColorBlendState = *PipelineCreateInfo->pColorBlendState;
             if (GraphicsEntry->ColorBlendState.attachmentCount > 0)
             {
-                GraphicsEntry->Attachments = PushArray(Arena, VkPipelineColorBlendAttachmentState, GraphicsEntry->ColorBlendState.attachmentCount);
+                GraphicsEntry->Attachments = PushArray(&Manager->Arena, VkPipelineColorBlendAttachmentState, GraphicsEntry->ColorBlendState.attachmentCount);
                 Copy(GraphicsEntry->ColorBlendState.pAttachments, GraphicsEntry->Attachments, sizeof(VkPipelineColorBlendAttachmentState)*GraphicsEntry->ColorBlendState.attachmentCount);
                 GraphicsEntry->ColorBlendState.pAttachments = GraphicsEntry->Attachments;
             }
@@ -807,7 +1040,7 @@ inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* M
             GraphicsEntry->DynamicStateCreateInfo = *PipelineCreateInfo->pDynamicState;
             if (GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount > 0)
             {
-                GraphicsEntry->DynamicStates = PushArray(Arena, VkDynamicState, GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount);
+                GraphicsEntry->DynamicStates = PushArray(&Manager->Arena, VkDynamicState, GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount);
                 Copy(GraphicsEntry->DynamicStateCreateInfo.pDynamicStates, GraphicsEntry->DynamicStates, sizeof(VkDynamicState)*GraphicsEntry->DynamicStateCreateInfo.dynamicStateCount);
                 GraphicsEntry->DynamicStateCreateInfo.pDynamicStates = GraphicsEntry->DynamicStates;
             }
@@ -832,26 +1065,28 @@ inline vk_pipeline* VkPipelineVsPsCreate(VkDevice Device, vk_pipeline_manager* M
                 GraphicsEntry->PipelineCreateInfo.pDepthStencilState = &GraphicsEntry->DepthStencilState;
             }
         }
-        
-        // NOTE: Create pipeline
-        VkShaderModule VsShader = VkPipelineAddShaderRef(Device, Arena, VsFileName, VsMainName, Entry->ShaderRefs + Entry->NumShaders++);
-        VkShaderModule PsShader = VkPipelineAddShaderRef(Device, Arena, PsFileName, PsMainName, Entry->ShaderRefs + Entry->NumShaders++);
 
-        // NOTE: Setup the pipeline create infos
-        VkPipelineShaderStageCreateInfo ShaderStages[2] = {};
-        ShaderStages[0] = VkPipelineShaderStage(VK_SHADER_STAGE_VERTEX_BIT, VsShader, VsMainName);
-        ShaderStages[1] = VkPipelineShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, PsShader, PsMainName);
-        
+        // NOTE: Store references to our shaders in managers arena
+        VkShaderModule ShaderModules[VK_MAX_PIPELINE_STAGES] = {};
+        VkPipelineShaderStageCreateInfo ShaderStages[VK_MAX_PIPELINE_STAGES] = {};
+        for (u32 ShaderId = 0; ShaderId < NumShaders; ++ShaderId)
+        {
+            VkPipelineAddShaderRef(Manager, Entry, Shaders[ShaderId]);
+            ShaderModules[ShaderId] = VkPipelineGetShaderModule(Device, TempArena, Entry->ShaderRefs + ShaderId);
+            ShaderStages[ShaderId] = VkPipelineShaderStage(Shaders[ShaderId].Stage, ShaderModules[ShaderId], Shaders[ShaderId].MainName);
+        }
         VkCheckResult(vkCreatePipelineLayout(Device, LayoutCreateInfo, 0, &Entry->Pipeline.Layout));
 
-        // NOTE: Patch up some values in the create info
+        // NOTE: Create pipeline (patch up some values in the create info)
         GraphicsEntry->PipelineCreateInfo.pStages = ShaderStages;
-        GraphicsEntry->PipelineCreateInfo.stageCount = ArrayCount(ShaderStages);
+        GraphicsEntry->PipelineCreateInfo.stageCount = NumShaders;
         GraphicsEntry->PipelineCreateInfo.layout = Entry->Pipeline.Layout;
         VkCheckResult(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &GraphicsEntry->PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
 
-        vkDestroyShaderModule(Device, VsShader, 0);
-        vkDestroyShaderModule(Device, PsShader, 0);
+        for (u32 ShaderId = 0; ShaderId < NumShaders; ++ShaderId)
+        {
+            vkDestroyShaderModule(Device, ShaderModules[ShaderId], 0);
+        }
     }
     
     return &Entry->Pipeline;
@@ -865,7 +1100,7 @@ inline void VkPipelineUpdateShaders(VkDevice Device, linear_arena* TempArena, vk
 
         b32 ReCreatePSO = false;
 
-        HANDLE FileHandles[VK_MAX_NUM_HANDLES] = {};
+        HANDLE FileHandles[VK_MAX_PIPELINE_STAGES] = {};
         for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
         {
             vk_shader_ref* CurrShaderRef = Entry->ShaderRefs + ShaderId;
@@ -899,38 +1134,40 @@ inline void VkPipelineUpdateShaders(VkDevice Device, linear_arena* TempArena, vk
                 {
                     vk_pipeline_graphics_entry* GraphicsEntry = &Entry->GraphicsEntry;
 
-                    VkShaderModule VsShader = VkPipelineAddShaderRef(Device, FileHandles[0], TempArena, Entry->ShaderRefs[0].FileName,
-                                                                     Entry->ShaderRefs[0].MainName, Entry->ShaderRefs + 0);
-                    VkShaderModule PsShader = VkPipelineAddShaderRef(Device, FileHandles[1], TempArena, Entry->ShaderRefs[1].FileName,
-                                                                     Entry->ShaderRefs[1].MainName, Entry->ShaderRefs + 1);
-    
-                    VkPipelineShaderStageCreateInfo ShaderStages[2] = {};
-                    ShaderStages[0] = VkPipelineShaderStage(VK_SHADER_STAGE_VERTEX_BIT, VsShader, Entry->ShaderRefs[0].MainName);
-                    ShaderStages[1] = VkPipelineShaderStage(VK_SHADER_STAGE_FRAGMENT_BIT, PsShader, Entry->ShaderRefs[1].MainName);
+                    // NOTE: Generate shader create infos
+                    VkShaderModule ShaderModules[VK_MAX_PIPELINE_STAGES] = {};
+                    VkPipelineShaderStageCreateInfo ShaderStages[VK_MAX_PIPELINE_STAGES] = {};
+                    for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
+                    {
+                        vk_shader_ref* ShaderRef = Entry->ShaderRefs + ShaderId;
+                        ShaderModules[ShaderId] = VkPipelineGetShaderModule(Device, FileHandles[ShaderId], TempArena, ShaderRef);
+                        ShaderStages[ShaderId] = VkPipelineShaderStage(ShaderRef->Stage, ShaderModules[ShaderId], ShaderRef->MainName);
+                    }
 
                     VkGraphicsPipelineCreateInfo PipelineCreateInfo = GraphicsEntry->PipelineCreateInfo;
                     PipelineCreateInfo.stageCount = Entry->NumShaders;
                     PipelineCreateInfo.pStages = ShaderStages;
                     VkCheckResult(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE, 1, &PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
 
-                    vkDestroyShaderModule(Device, VsShader, 0);
-                    vkDestroyShaderModule(Device, PsShader, 0);
+                    for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
+                    {
+                        vkDestroyShaderModule(Device, ShaderModules[ShaderId], 0);
+                    }
                 } break;
 
                 case VkPipelineEntry_Compute:
                 {
                     vk_pipeline_compute_entry* ComputeEntry = &Entry->ComputeEntry;
-                    
-                    VkShaderModule CsShader = VkPipelineAddShaderRef(Device, FileHandles[0], TempArena, Entry->ShaderRefs[0].FileName,
-                                                                     Entry->ShaderRefs[0].MainName, Entry->ShaderRefs + 0);
-                    VkPipelineShaderStageCreateInfo ShaderStageCreateInfo = VkPipelineShaderStage(VK_SHADER_STAGE_COMPUTE_BIT, CsShader,
-                                                                                                  Entry->ShaderRefs[0].MainName);
+
+                    vk_shader_ref* ShaderRef = Entry->ShaderRefs + 0;
+                    VkShaderModule ShaderModule = VkPipelineGetShaderModule(Device, FileHandles[0], TempArena, ShaderRef);
+                    VkPipelineShaderStageCreateInfo ShaderStageCreateInfo = VkPipelineShaderStage(ShaderRef->Stage, ShaderModule, ShaderRef->MainName);
 
                     VkComputePipelineCreateInfo PipelineCreateInfo = ComputeEntry->PipelineCreateInfo;
                     PipelineCreateInfo.stage = ShaderStageCreateInfo;
                     VkCheckResult(vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineCreateInfo, 0, &Entry->Pipeline.Handle));
 
-                    vkDestroyShaderModule(Device, CsShader, 0);
+                    vkDestroyShaderModule(Device, ShaderModule, 0);
                 } break;
 
                 default:
@@ -939,12 +1176,10 @@ inline void VkPipelineUpdateShaders(VkDevice Device, linear_arena* TempArena, vk
                 } break;
             }
         }
-        else
+
+        for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
         {
-            for (u32 ShaderId = 0; ShaderId < Entry->NumShaders; ++ShaderId)
-            {
-                CloseHandle(FileHandles[ShaderId]);
-            }
+            CloseHandle(FileHandles[ShaderId]);
         }
     }
 }
@@ -969,22 +1204,32 @@ inline vk_pipeline_builder VkPipelineBuilderBegin(linear_arena* Arena)
     Result.MaxNumColorAttachments = 10;
     Result.ColorAttachments = PushArray(Arena, VkPipelineColorBlendAttachmentState, Result.MaxNumColorAttachments);
 
+    // TODO: This should be specified but make more pipelines and see how to break it up
+    // NOTE: Specify rasterization flags
+    Result.RasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    Result.RasterizationState.depthClampEnable = VK_FALSE;
+    Result.RasterizationState.rasterizerDiscardEnable = VK_FALSE;
+    Result.RasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
+    Result.RasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    Result.RasterizationState.depthBiasEnable = VK_FALSE;
+    Result.RasterizationState.depthBiasConstantFactor = 0.0f;
+    Result.RasterizationState.depthBiasClamp = 0.0f;
+    Result.RasterizationState.depthBiasSlopeFactor = 0.0f;
+    Result.RasterizationState.lineWidth = 1.0f;
+    
     // NOTE: Set some default values
     VkPipelineInputAssemblyAdd(&Result, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE);
     
     return Result;
 }
 
-inline void VkPipelineVertexShaderAdd(vk_pipeline_builder* Builder, char* FileName, char* MainName)
+inline void VkPipelineShaderAdd(vk_pipeline_builder* Builder, char* FileName, char* MainName, VkShaderStageFlagBits Stage)
 {
-    Builder->VsFileName = FileName;
-    Builder->VsMainName = MainName;
-}
-
-inline void VkPipelineFragmentShaderAdd(vk_pipeline_builder* Builder, char* FileName, char* MainName)
-{
-    Builder->PsFileName = FileName;
-    Builder->PsMainName = MainName;
+    Assert(Builder->NumShaders < ArrayCount(Builder->Shaders));
+    vk_pipeline_builder_shader* Shader = Builder->Shaders + Builder->NumShaders++;
+    Shader->FileName = FileName;
+    Shader->MainName = MainName;
+    Shader->Stage = Stage;
 }
 
 inline void VkPipelineVertexBindingBegin(vk_pipeline_builder* Builder)
@@ -996,7 +1241,6 @@ inline void VkPipelineVertexBindingBegin(vk_pipeline_builder* Builder)
     VertexBinding->inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     Builder->CurrVertexBindingSize = 0;
-    Builder->CurrVertexLocation = 0;
 }
 
 inline void VkPipelineVertexBindingEnd(vk_pipeline_builder* Builder)
@@ -1017,6 +1261,11 @@ inline void VkPipelineVertexAttributeAdd(vk_pipeline_builder* Builder, VkFormat 
     VertexAttribute->offset = Builder->CurrVertexBindingSize;
 
     Builder->CurrVertexBindingSize += VertexAttribSize;
+}
+
+inline void VkPipelineVertexAttributeAddOffset(vk_pipeline_builder* Builder, u32 Offset)
+{
+    Builder->CurrVertexBindingSize += Offset;
 }
 
 inline void VkPipelineInputAssemblyAdd(vk_pipeline_builder* Builder, VkPrimitiveTopology Topology, VkBool32 PrimRestart)
@@ -1077,6 +1326,15 @@ inline void VkPipelineColorAttachmentAdd(vk_pipeline_builder* Builder, VkBool32 
     ColorAttachment->colorWriteMask = WriteMask;
 }
 
+inline void VkPipelineRasterizationStateSet(vk_pipeline_builder* Builder, VkBool32 RasterizerDiscardEnable, VkPolygonMode PolygonMode,
+                                            VkCullModeFlags CullMode, VkFrontFace FrontFace)
+{
+    Builder->RasterizationState.rasterizerDiscardEnable = RasterizerDiscardEnable;
+    Builder->RasterizationState.polygonMode = PolygonMode;
+    Builder->RasterizationState.cullMode = CullMode;
+    Builder->RasterizationState.frontFace = FrontFace;
+}
+
 inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice Device, vk_pipeline_manager* Manager,
                                          VkRenderPass RenderPass, u32 SubPassId, VkDescriptorSetLayout* Layouts, u32 NumLayouts)
 {
@@ -1097,20 +1355,6 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
     ViewPortStateCreateInfo.pViewports = 0;
     ViewPortStateCreateInfo.scissorCount = 1;
     ViewPortStateCreateInfo.pScissors = 0;
-
-    // TODO: This should be specified but make more pipelines and see how to break it up
-    // NOTE: Specify rasterization flags
-    VkPipelineRasterizationStateCreateInfo RasterizationStateCreateInfo = {};
-    RasterizationStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    RasterizationStateCreateInfo.depthClampEnable = VK_FALSE;
-    RasterizationStateCreateInfo.rasterizerDiscardEnable = VK_FALSE;
-    RasterizationStateCreateInfo.polygonMode = VK_POLYGON_MODE_FILL;
-    RasterizationStateCreateInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    RasterizationStateCreateInfo.depthBiasEnable = VK_FALSE;
-    RasterizationStateCreateInfo.depthBiasConstantFactor = 0.0f;
-    RasterizationStateCreateInfo.depthBiasClamp = 0.0f;
-    RasterizationStateCreateInfo.depthBiasSlopeFactor = 0.0f;
-    RasterizationStateCreateInfo.lineWidth = 1.0f;
 
     // TODO: This should be specified but make more pipeliens and see how to break it up
     // NOTE: Set the multi sampling state
@@ -1156,7 +1400,7 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
     PipelineCreateInfo.pVertexInputState = &VertexInputStateCreateInfo;
     PipelineCreateInfo.pInputAssemblyState = &Builder->InputAssembly;
     PipelineCreateInfo.pViewportState = &ViewPortStateCreateInfo;
-    PipelineCreateInfo.pRasterizationState = &RasterizationStateCreateInfo;
+    PipelineCreateInfo.pRasterizationState = &Builder->RasterizationState;
     if (Builder->Flags & VkPipelineFlag_HasDepthStencil)
     {
         PipelineCreateInfo.pDepthStencilState = &Builder->DepthStencil;
@@ -1169,8 +1413,8 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
     PipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
     PipelineCreateInfo.basePipelineIndex = -1;
 
-    Result = VkPipelineVsPsCreate(Device, Manager, Builder->Arena, Builder->VsFileName, Builder->VsMainName, Builder->PsFileName,
-                                  Builder->PsMainName, &LayoutCreateInfo, &PipelineCreateInfo);
+    Result = VkPipelineGraphicsCreate(Device, Manager, Builder->Arena, Builder->Shaders, Builder->NumShaders, &LayoutCreateInfo,
+                                      &PipelineCreateInfo);
     
     EndTempMem(Builder->TempMem);
 
@@ -1224,40 +1468,68 @@ inline vk_transfer_manager VkTransferManagerCreate(VkDevice Device, u32 StagingT
     return Result;
 }
 
-#define VkTransferPushBufferWriteStruct(Updater, Buffer, Type, Alignment, InputMask, OutputMask) \
-    (Type*)VkTransferPushBufferWrite(Updater, Buffer, sizeof(Type), Alignment, InputMask, OutputMask)
-#define VkTransferPushBufferWriteArray(Updater, Buffer, Type, Count, Alignment, InputMask, OutputMask) \
-    (Type*)VkTransferPushBufferWrite(Updater, Buffer, sizeof(Type)*Count, Alignment, InputMask, OutputMask)
-inline u8* VkTransferPushBufferWrite(vk_transfer_manager* Updater, VkBuffer Buffer, u64 BufferSize, u64 Alignment,
-                                     barrier_mask InputMask, barrier_mask OutputMask)
+#define VkTransferExpand(x) x
+
+// NOTE: Updates
+#define VkTransferPushWriteStruct6(Manager, Buffer, DstOffset, Type, InputMask, OutputMask) \
+    (Type*)VkTransferPushWrite(Manager, Buffer, DstOffset, sizeof(Type), InputMask, OutputMask)
+#define VkTransferPushWriteArray7(Manager, Buffer, DstOffset, Type, Count, InputMask, OutputMask) \
+    (Type*)VkTransferPushWrite(Manager, Buffer, DstOffset, sizeof(Type)*Count, InputMask, OutputMask)
+
+// NOTE: Full writes
+#define VkTransferPushWriteStruct5(Manager, Buffer, Type, InputMask, OutputMask) \
+    (Type*)VkTransferPushWrite(Manager, Buffer, 0, sizeof(Type), InputMask, OutputMask)
+#define VkTransferPushWriteArray6(Manager, Buffer, Type, Count, InputMask, OutputMask) \
+    (Type*)VkTransferPushWrite(Manager, Buffer, 0, sizeof(Type)*Count, InputMask, OutputMask)
+
+// NOTE: Macro overloading (C++ I hate you)
+#define VkTransferStructGetMacro(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6, NAME, ...) NAME
+#define VkTransferPushWriteStruct(...) VkTransferExpand(VkTransferStructGetMacro(__VA_ARGS__, VkTransferPushWriteStruct6, VkTransferPushWriteStruct5)(__VA_ARGS__))
+
+#define VkTransferArrayGetMacro(Arg1, Arg2, Arg3, Arg4, Arg5, Arg6, Arg7, NAME, ...) NAME
+#define VkTransferPushWriteArray(...) VkTransferExpand(VkTransferArrayGetMacro(__VA_ARGS__, VkTransferPushWriteArray7, VkTransferPushWriteArray6)(__VA_ARGS__))
+
+inline u8* VkTransferPushWrite(vk_transfer_manager* Manager, VkBuffer Buffer, u64 DstOffset, u64 WriteSize,
+                               barrier_mask InputMask, barrier_mask OutputMask)
 {
-    Updater->StagingOffset = AlignAddress(Updater->StagingOffset, Alignment);
-    Assert((Updater->StagingOffset + BufferSize) <= Updater->StagingSize);
-    u8* Result = Updater->StagingPtr + Updater->StagingOffset;
- 
-    Assert(Updater->NumBufferTransfers < Updater->MaxNumBufferTransfers);
-    vk_buffer_transfer* Transfer = Updater->BufferTransferArray + Updater->NumBufferTransfers++;
+    // TODO: Do we need to pass in a alignment or can that just be inferred since this is a buffer? minMemoryMapAlignment
+    Manager->StagingOffset = AlignAddress(Manager->StagingOffset, 1);
+    Assert((Manager->StagingOffset + WriteSize) <= Manager->StagingSize);
+    u8* Result = Manager->StagingPtr + Manager->StagingOffset;
+
+    Assert(Manager->NumBufferTransfers < Manager->MaxNumBufferTransfers);
+    vk_buffer_transfer* Transfer = Manager->BufferTransferArray + Manager->NumBufferTransfers++;
+    *Transfer = {};
     Transfer->Buffer = Buffer;
-    Transfer->Size = BufferSize;
-    Transfer->StagingOffset = Updater->StagingOffset;
+    Transfer->Size = WriteSize;
+    Transfer->DstOffset = DstOffset;
+    Transfer->StagingOffset = Manager->StagingOffset;
     Transfer->InputMask = InputMask;
     Transfer->OutputMask = OutputMask;
 
-    Updater->StagingOffset += BufferSize;
+    Manager->StagingOffset += WriteSize;
     return Result;
 }
 
-inline u8* VkTransferPushImageWrite(vk_transfer_manager* Updater, VkImage Image, u32 Width, u32 Height, u32 ImageSize,
+inline u8* VkTransferPushWrite(vk_transfer_manager* Manager, VkBuffer Buffer, u64 WriteSize, barrier_mask InputMask,
+                               barrier_mask OutputMask)
+{
+    u8* Result = VkTransferPushWrite(Manager, Buffer, 0, WriteSize, InputMask, OutputMask);
+    return Result;
+}
+
+inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image, u32 Width, u32 Height, u32 ImageSize,
                                     VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
                                     barrier_mask InputMask, barrier_mask OutputMask)
 {
-    // TODO: Do we need alignment?
     // TODO: Handle format sizes here?
-    Assert(Updater->StagingOffset + ImageSize <= Updater->StagingSize);
-    u8* Result = Updater->StagingPtr + Updater->StagingOffset;
+    // TODO: Do we need to pass in a alignment or can that just be inferred since this is a buffer? minMemoryMapAlignment
+    Manager->StagingOffset = AlignAddress(Manager->StagingOffset, 1);
+    Assert(Manager->StagingOffset + ImageSize <= Manager->StagingSize);
+    u8* Result = Manager->StagingPtr + Manager->StagingOffset;
 
-    vk_image_transfer* Transfer = Updater->ImageTransferArray + Updater->NumImageTransfers++;
-    Transfer->StagingOffset = Updater->StagingOffset;
+    vk_image_transfer* Transfer = Manager->ImageTransferArray + Manager->NumImageTransfers++;
+    Transfer->StagingOffset = Manager->StagingOffset;
     Transfer->Image = Image;
     Transfer->Width = Width;
     Transfer->Height = Height;
@@ -1267,68 +1539,69 @@ inline u8* VkTransferPushImageWrite(vk_transfer_manager* Updater, VkImage Image,
     Transfer->OutputMask = OutputMask;
     Transfer->OutputLayout = OutputLayout;
     
-    Updater->StagingOffset += ImageSize;
+    Manager->StagingOffset += ImageSize;
     return Result;
 }
 
-inline void VkTransferManagerFlush(vk_transfer_manager* Updater, VkDevice Device, VkCommandBuffer CmdBuffer, vk_barrier_manager* Batcher)
+inline void VkTransferManagerFlush(vk_transfer_manager* Manager, VkDevice Device, VkCommandBuffer CmdBuffer,
+                                   vk_barrier_manager* BarrierManager)
 {
     VkMappedMemoryRange FlushRange = {};
     FlushRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    FlushRange.memory = Updater->StagingMem;
+    FlushRange.memory = Manager->StagingMem;
     FlushRange.offset = 0;
-    FlushRange.size = AlignAddress(Updater->StagingOffset, Updater->FlushAlignment);
+    FlushRange.size = AlignAddress(Manager->StagingOffset, Manager->FlushAlignment);
     vkFlushMappedMemoryRanges(Device, 1, &FlushRange);
 
     barrier_mask IntermediateMask = BarrierMask(VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
     
     // NOTE: Transfer all buffers
-    if (Updater->NumBufferTransfers > 0)
+    if (Manager->NumBufferTransfers > 0)
     {
-        for (u32 BufferId = 0; BufferId < Updater->NumBufferTransfers; ++BufferId)
+        for (u32 BufferId = 0; BufferId < Manager->NumBufferTransfers; ++BufferId)
         {
-            vk_buffer_transfer* BufferTransfer = Updater->BufferTransferArray + BufferId;            
-            VkBarrierBufferAdd(Batcher, BufferTransfer->InputMask, IntermediateMask, BufferTransfer->Buffer);
+            vk_buffer_transfer* BufferTransfer = Manager->BufferTransferArray + BufferId;            
+            VkBarrierBufferAdd(BarrierManager, BufferTransfer->InputMask, IntermediateMask, BufferTransfer->Buffer);
         }
 
-        VkBarrierManagerFlush(Batcher, CmdBuffer);
+        VkBarrierManagerFlush(BarrierManager, CmdBuffer);
         
-        for (u32 BufferId = 0; BufferId < Updater->NumBufferTransfers; ++BufferId)
+        for (u32 BufferId = 0; BufferId < Manager->NumBufferTransfers; ++BufferId)
         {
-            vk_buffer_transfer* BufferTransfer = Updater->BufferTransferArray + BufferId;
+            vk_buffer_transfer* BufferTransfer = Manager->BufferTransferArray + BufferId;
         
             VkBufferCopy BufferCopy = {};
             BufferCopy.srcOffset = BufferTransfer->StagingOffset;
-            BufferCopy.dstOffset = 0;
+            BufferCopy.dstOffset = BufferTransfer->DstOffset;
             BufferCopy.size = BufferTransfer->Size;
-            vkCmdCopyBuffer(CmdBuffer, Updater->StagingBuffer, BufferTransfer->Buffer, 1, &BufferCopy);
+            vkCmdCopyBuffer(CmdBuffer, Manager->StagingBuffer, BufferTransfer->Buffer, 1, &BufferCopy);
         }
         
-        for (u32 BufferId = 0; BufferId < Updater->NumBufferTransfers; ++BufferId)
+        for (u32 BufferId = 0; BufferId < Manager->NumBufferTransfers; ++BufferId)
         {
-            vk_buffer_transfer* BufferTransfer = Updater->BufferTransferArray + BufferId;
-            VkBarrierBufferAdd(Batcher, IntermediateMask, BufferTransfer->OutputMask, BufferTransfer->Buffer);
+            vk_buffer_transfer* BufferTransfer = Manager->BufferTransferArray + BufferId;
+            VkBarrierBufferAdd(BarrierManager, IntermediateMask, BufferTransfer->OutputMask, BufferTransfer->Buffer);
         }
 
-        VkBarrierManagerFlush(Batcher, CmdBuffer);
-        Updater->NumBufferTransfers = 0;
+        VkBarrierManagerFlush(BarrierManager, CmdBuffer);
+        Manager->NumBufferTransfers = 0;
     }
     
     // NOTE: Transfer all images
-    if (Updater->NumImageTransfers > 0)
+    if (Manager->NumImageTransfers > 0)
     {
-        for (u32 ImageId = 0; ImageId < Updater->NumImageTransfers; ++ImageId)
+        for (u32 ImageId = 0; ImageId < Manager->NumImageTransfers; ++ImageId)
         {
-            vk_image_transfer* ImageTransfer = Updater->ImageTransferArray + ImageId;
-            VkBarrierImageAdd(Batcher, ImageTransfer->InputMask, ImageTransfer->InputLayout, IntermediateMask,
+            vk_image_transfer* ImageTransfer = Manager->ImageTransferArray + ImageId;
+            VkBarrierImageAdd(BarrierManager, ImageTransfer->InputMask, ImageTransfer->InputLayout, IntermediateMask,
                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->AspectMask, ImageTransfer->Image);
         }
 
-        VkBarrierManagerFlush(Batcher, CmdBuffer);
+        VkBarrierManagerFlush(BarrierManager, CmdBuffer);
 
-        for (u32 ImageId = 0; ImageId < Updater->NumImageTransfers; ++ImageId)
+        for (u32 ImageId = 0; ImageId < Manager->NumImageTransfers; ++ImageId)
         {
-            vk_image_transfer ImageTransfer = Updater->ImageTransferArray[ImageId];
+            vk_image_transfer ImageTransfer = Manager->ImageTransferArray[ImageId];
 
             VkBufferImageCopy ImageCopy = {};
             ImageCopy.bufferOffset = ImageTransfer.StagingOffset;
@@ -1344,20 +1617,20 @@ inline void VkTransferManagerFlush(vk_transfer_manager* Updater, VkDevice Device
             ImageCopy.imageExtent.width = ImageTransfer.Width;
             ImageCopy.imageExtent.height = ImageTransfer.Height;
             ImageCopy.imageExtent.depth = 1;
-            vkCmdCopyBufferToImage(CmdBuffer, Updater->StagingBuffer, ImageTransfer.Image,
+            vkCmdCopyBufferToImage(CmdBuffer, Manager->StagingBuffer, ImageTransfer.Image,
                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ImageCopy);
         }
 
-        for (u32 ImageId = 0; ImageId < Updater->NumImageTransfers; ++ImageId)
+        for (u32 ImageId = 0; ImageId < Manager->NumImageTransfers; ++ImageId)
         {
-            vk_image_transfer* ImageTransfer = Updater->ImageTransferArray + ImageId;
-            VkBarrierImageAdd(Batcher, IntermediateMask, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->OutputMask,
+            vk_image_transfer* ImageTransfer = Manager->ImageTransferArray + ImageId;
+            VkBarrierImageAdd(BarrierManager, IntermediateMask, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->OutputMask,
                               ImageTransfer->OutputLayout, ImageTransfer->AspectMask, ImageTransfer->Image);
         }
 
-        VkBarrierManagerFlush(Batcher, CmdBuffer);
-        Updater->NumImageTransfers = 0;
+        VkBarrierManagerFlush(BarrierManager, CmdBuffer);
+        Manager->NumImageTransfers = 0;
     }
         
-    Updater->StagingOffset = 0;
+    Manager->StagingOffset = 0;
 }

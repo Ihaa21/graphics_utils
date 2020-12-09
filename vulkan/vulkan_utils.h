@@ -50,7 +50,16 @@ struct vk_render_pass_builder
     u32 NumAttachments;
     VkAttachmentDescription* Attachments;
 
+    // NOTE: Dependencies
+    u32 MaxNumDependencies;
+    u32 NumDependencies;
+    VkSubpassDependency* Dependencies;
+    
     // NOTE: SubPass data
+    u32 MaxNumInputAttachmentRefs;
+    u32 NumInputAttachmentRefs;
+    VkAttachmentReference* InputAttachmentRefs;
+
     u32 MaxNumColorAttachmentRefs;
     u32 NumColorAttachmentRefs;
     VkAttachmentReference* ColorAttachmentRefs;
@@ -66,17 +75,21 @@ struct vk_render_pass_builder
 };
 
 //
-// NOTE: Barrier Batcher
+// NOTE: Barrier Manager
 //
 
 struct barrier_mask
 {
-    VkAccessFlagBits AccessMask;
+    VkAccessFlags AccessMask;
     VkPipelineStageFlags StageMask;
 };
 
 struct vk_barrier_manager
 {
+    u32 MaxNumMemoryBarriers;
+    u32 NumMemoryBarriers;
+    VkMemoryBarrier* MemoryBarrierArray;
+
     u32 MaxNumImageBarriers;
     u32 NumImageBarriers;
     VkImageMemoryBarrier* ImageBarrierArray;
@@ -117,6 +130,7 @@ struct vk_shader_ref
     char* FileName;
     char* MainName;
     FILETIME ModifiedTime;
+    VkShaderStageFlagBits Stage;
 };
 
 enum vk_pipeline_entry_type
@@ -158,7 +172,8 @@ struct vk_pipeline_compute_entry
     VkComputePipelineCreateInfo PipelineCreateInfo;
 };
 
-#define VK_MAX_NUM_HANDLES 5
+// TODO: Verify we can only have up to 5 shaders for graphics pipelines
+#define VK_MAX_PIPELINE_STAGES 5
 struct vk_pipeline_entry
 {
     vk_pipeline_entry_type Type;
@@ -169,13 +184,15 @@ struct vk_pipeline_entry
     };
 
     u32 NumShaders;
-    vk_shader_ref ShaderRefs[VK_MAX_NUM_HANDLES];
+    vk_shader_ref ShaderRefs[VK_MAX_PIPELINE_STAGES];
 
     vk_pipeline Pipeline;
 };
 
 struct vk_pipeline_manager
 {
+    linear_arena Arena;
+    
     u32 MaxNumPipelines;
     u32 NumPipelines;
     vk_pipeline_entry* PipelineArray;
@@ -190,6 +207,13 @@ enum vk_pipeline_builder_flags
     VkPipelineFlag_HasDepthStencil = 1 << 0,
 };
 
+struct vk_pipeline_builder_shader
+{
+    char* FileName;
+    char* MainName;
+    VkShaderStageFlagBits Stage;
+};
+
 struct vk_pipeline_builder
 {
     linear_arena* Arena;
@@ -198,11 +222,8 @@ struct vk_pipeline_builder
     u32 Flags;
 
     // NOTE: Shader data
-    // TODO: Add support for GS, TS, mesh shaders, etc.
-    char* VsFileName;
-    char* VsMainName;
-    char* PsFileName;
-    char* PsMainName;
+    u32 NumShaders;
+    vk_pipeline_builder_shader Shaders[VK_MAX_PIPELINE_STAGES];
     
     // NOTE: Vertex data
     u32 CurrVertexBindingSize;
@@ -226,6 +247,8 @@ struct vk_pipeline_builder
     u32 MaxNumColorAttachments;
     u32 NumColorAttachments;
     VkPipelineColorBlendAttachmentState* ColorAttachments;
+
+    VkPipelineRasterizationStateCreateInfo RasterizationState;
     
     VkGraphicsPipelineCreateInfo PipelineCreateInfo;
 };
@@ -239,6 +262,7 @@ inline void VkPipelineInputAssemblyAdd(vk_pipeline_builder* Builder, VkPrimitive
 struct vk_buffer_transfer
 {
     VkBuffer Buffer;
+    u64 DstOffset;
     u64 Size;
     u64 StagingOffset;
 
