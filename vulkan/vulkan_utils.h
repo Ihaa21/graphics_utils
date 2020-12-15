@@ -29,10 +29,11 @@ struct vk_gpu_temp_mem
 // NOTE: Descriptor Layout Builder
 //
 
+// TODO: Dynamic Arena
 struct vk_descriptor_layout_builder
 {
     u32 CurrNumBindings;
-    VkDescriptorSetLayoutBinding Bindings[10];
+    VkDescriptorSetLayoutBinding Bindings[100];
     VkDescriptorSetLayout* Layout;
 };
 
