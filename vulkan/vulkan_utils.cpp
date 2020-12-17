@@ -84,48 +84,8 @@ inline aabb2i VkClipConversion(u32 RenderHeight, aabb2i ClipBounds)
 }
 
 //
-// NOTE: Memory Arena
+// NOTE: Memory Functions
 //
-
-inline vk_gpu_linear_arena VkGpuLinearArenaCreate(VkDeviceMemory Memory, u64 Size)
-{
-    vk_gpu_linear_arena Result = {};
-    Result.Size = Size;
-    Result.Memory = Memory;
-
-    return Result;
-}
-
-inline vk_gpu_ptr VkPushSize(vk_gpu_linear_arena* Arena, u64 Size, u64 Alignment)
-{
-    // TODO: Can we assume that our memory is aligned to our resources max requirement?
-    u64 AlignedAddress = AlignAddress(Arena->Used, Alignment);
-    Assert(AlignedAddress + Size <= Arena->Size);
-    
-    vk_gpu_ptr Result = {};
-    Result.Memory = &Arena->Memory;
-    Result.Offset = AlignedAddress;
-
-    Arena->Used = AlignedAddress + Size;
-
-    return Result;
-}
-
-inline vk_gpu_temp_mem VkBeginTempMem(vk_gpu_linear_arena* Arena)
-{
-    // NOTE: This function lets us take all memory allocated past this point and later
-    // free it
-    vk_gpu_temp_mem TempMem = {};
-    TempMem.Arena = Arena;
-    TempMem.Used = Arena->Used;
-
-    return TempMem;
-}
-
-inline void VkEndTempMem(vk_gpu_temp_mem TempMem)
-{
-    TempMem.Arena->Used = TempMem.Used;
-}
 
 inline i32 VkGetMemoryType(VkPhysicalDeviceMemoryProperties* MemoryProperties, u32 RequiredType, VkMemoryPropertyFlags RequiredProperties)
 {
@@ -159,6 +119,148 @@ inline VkDeviceMemory VkMemoryAllocate(VkDevice Device, u32 Type, u64 Size)
     VkCheckResult(vkAllocateMemory(Device, &MemoryAllocateInfo, 0, &Result));
 
     return Result;
+}
+
+//
+// NOTE: Linear Arena
+//
+
+inline vk_linear_arena VkLinearArenaCreate(VkDeviceMemory Memory, u64 Size)
+{
+    vk_linear_arena Result = {};
+    Result.Size = Size;
+    Result.Memory = Memory;
+
+    return Result;
+}
+
+inline vk_ptr VkPushSize(vk_linear_arena* Arena, u64 Size, u64 Alignment)
+{
+    u64 AlignedAddress = AlignAddress(Arena->Used, Alignment);
+    Assert(AlignedAddress + Size <= Arena->Size);
+    
+    vk_ptr Result = {};
+    Result.Memory = Arena->Memory;
+    Result.Offset = AlignedAddress;
+
+    Arena->Used = AlignedAddress + Size;
+
+    return Result;
+}
+
+inline void VkArenaClear(vk_linear_arena* Arena)
+{
+    Arena->Used = 0;
+}
+
+inline vk_temp_mem VkBeginTempMem(vk_linear_arena* Arena)
+{
+    // NOTE: This function lets us take all memory allocated past this point and later
+    // free it
+    vk_temp_mem TempMem = {};
+    TempMem.Arena = Arena;
+    TempMem.Used = Arena->Used;
+
+    return TempMem;
+}
+
+inline void VkEndTempMem(vk_temp_mem TempMem)
+{
+    TempMem.Arena->Used = TempMem.Used;
+}
+
+//
+// NOTE: Dynamic Arena
+//
+
+inline vk_dynamic_arena VkDynamicArenaCreate(u32 GpuMemoryType, u64 GpuBlockSize)
+{
+    vk_dynamic_arena Result = {};
+    Result.CpuArena = DynamicArenaCreate(KiloBytes(4));
+    Result.GpuBlockSize = GpuBlockSize;
+    Result.GpuMemoryType = GpuMemoryType;
+
+    return Result;
+}
+
+inline vk_ptr VkPushSize(VkDevice Device, vk_dynamic_arena* Arena, u64 Size, u64 Alignment)
+{
+    vk_ptr Result = {};
+
+    vk_dynamic_arena_header* Header = Arena->CurrHeader;
+    u64 AlignedOffset = Header ? AlignAddress(Header->Used, Alignment) : 0;
+    if (!Header || (AlignedOffset + Size) > Header->Size)
+    {
+        // NOTE: Allocate new block
+        vk_dynamic_arena_header* NewHeader = PushStruct(&Arena->CpuArena, vk_dynamic_arena_header);
+        *NewHeader = {};
+        
+        NewHeader->GpuMemory = VkMemoryAllocate(Device, Arena->GpuMemoryType, Max(Size, Arena->GpuBlockSize));
+        Arena->CurrHeader = NewHeader;
+        Header = NewHeader;
+        AlignedOffset = AlignAddress(Header->Used, Alignment);
+    }
+
+    // NOTE: Suballocate
+    Result.Memory = Header->GpuMemory;
+    Result.Offset = Header->Used + AlignedOffset;
+    Header->Used = AlignedOffset + Size;
+
+    return Result;
+}
+
+inline void VkArenaClear(VkDevice Device, vk_dynamic_arena* Arena)
+{
+    for (dynamic_arena_header* Header = Arena->CpuArena.Next;
+         Header;
+         Header = Header->Next)
+    {
+        u32 ByteId = 0;
+        for (vk_dynamic_arena_header* VkHeader = (vk_dynamic_arena_header*)DynamicArenaHeaderGetData(Header);
+             ByteId < DynamicArenaHeaderGetSize(Header);
+             ByteId += sizeof(*VkHeader), VkHeader += 1)
+        {
+            vkFreeMemory(Device, VkHeader->GpuMemory, 0);
+        }
+    }
+
+    ArenaClear(&Arena->CpuArena);
+}
+
+inline vk_dynamic_temp_mem VkBeginTempMem(vk_dynamic_arena* Arena)
+{
+    vk_dynamic_temp_mem Result = {};
+    Result.Arena = Arena;
+    Result.GpuHeader = Arena->CurrHeader;
+    Result.GpuUsed = Result.GpuHeader->Used;
+
+    return Result;
+}
+
+inline void VkEndTempMem(VkDevice Device, vk_dynamic_temp_mem TempMem)
+{
+    for (dynamic_arena_header* Header = TempMem.Arena->CpuArena.Prev;
+         Header;
+         Header = Header->Prev)
+    {
+        vk_dynamic_arena_header* FirstGpuHeader = (vk_dynamic_arena_header*)DynamicArenaHeaderGetData(Header);
+        u32 NumGpuHeaders = u32(DynamicArenaHeaderGetSize(Header) / sizeof(*FirstGpuHeader));
+
+        for (u32 GpuHeaderId = NumGpuHeaders - 1; GpuHeaderId != 0; --GpuHeaderId)
+        {
+            vk_dynamic_arena_header* CurrGpuHeader = FirstGpuHeader + GpuHeaderId;
+
+            if (CurrGpuHeader == TempMem.GpuHeader)
+            {
+                CurrGpuHeader->Used = TempMem.GpuUsed;
+            }
+            else
+            {
+                vkFreeMemory(Device, CurrGpuHeader->GpuMemory, 0);
+                Header->Used -= sizeof(vk_dynamic_arena_header);
+            }
+        }
+    }
 }
 
 //
@@ -211,8 +313,8 @@ inline void VkCommandsSubmit(VkQueue Queue, vk_commands Commands)
 //
 
 // TODO: We don't use the gpu ptr anywhere as far as I can tell, remove?
-inline void VkBufferCreate(VkDevice Device, vk_gpu_linear_arena* Arena, VkBufferUsageFlags Usage,
-                           u64 BufferSize, VkBuffer* OutBuffer, vk_gpu_ptr* OutGpuPtr)
+inline void VkBufferCreate(VkDevice Device, vk_linear_arena* Arena, VkBufferUsageFlags Usage,
+                           u64 BufferSize, VkBuffer* OutBuffer, vk_ptr* OutGpuPtr)
 {
     VkBufferCreateInfo BufferCreateInfo = {};
     BufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -226,14 +328,14 @@ inline void VkBufferCreate(VkDevice Device, vk_gpu_linear_arena* Arena, VkBuffer
     VkMemoryRequirements BufferMemRequirements;
     vkGetBufferMemoryRequirements(Device, *OutBuffer, &BufferMemRequirements);
     *OutGpuPtr = VkPushSize(Arena, BufferMemRequirements.size, BufferMemRequirements.alignment);
-    VkCheckResult(vkBindBufferMemory(Device, *OutBuffer, *OutGpuPtr->Memory, OutGpuPtr->Offset));
+    VkCheckResult(vkBindBufferMemory(Device, *OutBuffer, OutGpuPtr->Memory, OutGpuPtr->Offset));
 }
 
-inline VkBuffer VkBufferCreate(VkDevice Device, vk_gpu_linear_arena* Arena, VkBufferUsageFlags Usage,
+inline VkBuffer VkBufferCreate(VkDevice Device, vk_linear_arena* Arena, VkBufferUsageFlags Usage,
                                u64 BufferSize)
 {
     VkBuffer Result = {};
-    vk_gpu_ptr Ptr = {};
+    vk_ptr Ptr = {};
     VkBufferCreate(Device, Arena, Usage, BufferSize, &Result, &Ptr);
     return Result;
 }
@@ -257,7 +359,7 @@ inline VkBufferView VkBufferViewCreate(VkDevice Device, VkBuffer Buffer, VkForma
 // NOTE: Image Helpers
 //
 
-inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Width, u32 Height,
+inline void VkImage2dCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
                             VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkImage* OutImage,
                             VkImageView* OutImageView)
 {
@@ -279,8 +381,8 @@ inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Wid
 
     VkMemoryRequirements ImageMemRequirements;
     vkGetImageMemoryRequirements(Device, *OutImage, &ImageMemRequirements);
-    vk_gpu_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
-    VkCheckResult(vkBindImageMemory(Device, *OutImage, *MemPtr.Memory, MemPtr.Offset));
+    vk_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
+    VkCheckResult(vkBindImageMemory(Device, *OutImage, MemPtr.Memory, MemPtr.Offset));
 
     // NOTE: Create image view
     VkImageViewCreateInfo ImgViewCreateInfo = {};
@@ -300,7 +402,7 @@ inline void VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Wid
     VkCheckResult(vkCreateImageView(Device, &ImgViewCreateInfo, 0, OutImageView));
 }
 
-inline vk_image VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Width, u32 Height,
+inline vk_image VkImage2dCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
                                 VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask)
 {
     vk_image Result = {};
@@ -309,7 +411,7 @@ inline vk_image VkImage2dCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32
     return Result;
 }
 
-inline vk_image VkCubeMapCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format,
+inline vk_image VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format,
                                 VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, u32 MipLevels = 1)
 {
     vk_image Result = {};
@@ -333,8 +435,8 @@ inline vk_image VkCubeMapCreate(VkDevice Device, vk_gpu_linear_arena* Arena, u32
 
     VkMemoryRequirements ImageMemRequirements;
     vkGetImageMemoryRequirements(Device, Result.Image, &ImageMemRequirements);
-    vk_gpu_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
-    VkCheckResult(vkBindImageMemory(Device, Result.Image, *MemPtr.Memory, MemPtr.Offset));
+    vk_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
+    VkCheckResult(vkBindImageMemory(Device, Result.Image, MemPtr.Memory, MemPtr.Offset));
 
     // NOTE: Create image view
     VkImageViewCreateInfo ImgViewCreateInfo = {};
@@ -1425,8 +1527,11 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
 // NOTE: Transfer Manager
 //
 
+// TODO: Transfer Manager needs to be given support for multiple uploads in the same cmd buffer + expandable and freeing
+// the memory. For now we put it here to avoid it
+
 inline vk_transfer_manager VkTransferManagerCreate(VkDevice Device, u32 StagingTypeId, linear_arena* CpuArena,
-                                                   vk_gpu_linear_arena* GpuArena, u64 FlushAlignment, u64 StagingSize,
+                                                   vk_linear_arena* GpuArena, u64 FlushAlignment, u64 StagingSize,
                                                    u32 MaxNumBufferTransfers, u32 MaxNumImageTransfers)
 {
     vk_transfer_manager Result = {};
