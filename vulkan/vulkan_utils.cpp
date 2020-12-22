@@ -52,10 +52,10 @@ inline m4 VkOrthoProjM4(f32 Left, f32 Right, f32 Top, f32 Bottom, f32 Near, f32 
 {
     m4 Result = {};
     Result.v[0].x = 2.0f / (Right - Left);
-    Result.v[1].y = -2.0f / (Top - Bottom);
+    Result.v[1].y = 2.0f / (Bottom - Top);
     Result.v[2].z = 1.0f / (Far - Near);
-    Result.v[3].x = (-Right + Left) / (Right - Left);
-    Result.v[3].y = (Top - Bottom) / (Top - Bottom);
+    Result.v[3].x = -(Left + Right) / (Right - Left);
+    Result.v[3].y = -(Bottom + Top) / (Bottom - Top);
     Result.v[3].z = (-Near) / (Far - Near);
     Result.v[3].w = 1.0f;
 
@@ -64,12 +64,13 @@ inline m4 VkOrthoProjM4(f32 Left, f32 Right, f32 Top, f32 Bottom, f32 Near, f32 
 
 inline m4 VkPerspProjM4(f32 AspectRatio, f32 Fov, f32 Near, f32 Far)
 {
+    // NOTE: Reverse Z
     m4 Result = {};
     Result.v[0].x = 1.0f / (AspectRatio*Tan(Fov*0.5f));
     Result.v[1].y = -1.0f / (Tan(Fov*0.5f));
-    Result.v[2].z = (-Far) / (Near - Far);
+    Result.v[2].z = (-Near) / (Far - Near);
     Result.v[2].w = 1.0f;
-    Result.v[3].z = (Near*Far) / (Near - Far);
+    Result.v[3].z = (Near*Far) / (Far - Near);
     
     return Result;
 }
@@ -734,6 +735,8 @@ inline void VkRenderPassSubPassBegin(vk_render_pass_builder* Builder, VkPipeline
 {
     Assert(Builder->NumSubPasses < Builder->MaxNumSubPasses);
 
+    Builder->RecordingSubPass = true;
+    
     VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
     *SubPass = {};
     SubPass->pipelineBindPoint = BindPoint;
@@ -785,6 +788,7 @@ inline void VkRenderPassDepthRefAdd(vk_render_pass_builder* Builder, u32 Attachm
 
 inline void VkRenderPassSubPassEnd(vk_render_pass_builder* Builder)
 {
+    Builder->RecordingSubPass = false;
     Builder->NumSubPasses++;
 }
 
@@ -795,8 +799,22 @@ inline void VkRenderPassDependency(vk_render_pass_builder* Builder, VkPipelineSt
     Assert(Builder->NumDependencies < Builder->MaxNumDependencies);
 
     VkSubpassDependency* Dependency = Builder->Dependencies + Builder->NumDependencies++;
-    Dependency->srcSubpass = Builder->NumSubPasses - 1;
-    Dependency->dstSubpass = Builder->NumSubPasses;
+    if (Builder->NumSubPasses - 1 < 0)
+    {
+        Dependency->srcSubpass = VK_SUBPASS_EXTERNAL;
+    }
+    else
+    {
+        Dependency->srcSubpass = Builder->NumSubPasses - 1;
+    }
+    if (Builder->RecordingSubPass)
+    {
+        Dependency->dstSubpass = Builder->NumSubPasses;
+    }
+    else
+    {
+        Dependency->dstSubpass = VK_SUBPASS_EXTERNAL;
+    }
     Dependency->srcStageMask = SrcStageFlags;
     Dependency->dstStageMask = DstStageFlags;
     Dependency->srcAccessMask = SrcAccessMask;
@@ -1401,6 +1419,15 @@ inline void VkPipelineDepthBoundsAdd(vk_pipeline_builder* Builder, f32 Min, f32 
     Builder->DepthStencil.maxDepthBounds = Max;
 }
 
+inline void VkPipelineDepthOffsetAdd(vk_pipeline_builder* Builder, f32 ConstantFactor, f32 Clamp, f32 SlopeFactor)
+{
+    Assert((Builder->Flags & VkPipelineFlag_HasDepthStencil) != 0);
+    Builder->RasterizationState.depthBiasEnable = VK_TRUE;
+    Builder->RasterizationState.depthBiasConstantFactor = ConstantFactor;
+    Builder->RasterizationState.depthBiasClamp = Clamp;
+    Builder->RasterizationState.depthBiasSlopeFactor = SlopeFactor;
+}
+
 inline void VkPipelineStencilStateAdd(vk_pipeline_builder* Builder, VkStencilOpState Front, VkStencilOpState Back)
 {
     Builder->Flags |= VkPipelineFlag_HasDepthStencil;
@@ -1623,13 +1650,13 @@ inline u8* VkTransferPushWrite(vk_transfer_manager* Manager, VkBuffer Buffer, u6
     return Result;
 }
 
-inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image, u32 Width, u32 Height, u32 ImageSize,
+inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image, u32 Width, u32 Height, mm TexelSize, 
                                     VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
                                     barrier_mask InputMask, barrier_mask OutputMask)
 {
-    // TODO: Handle format sizes here?
-    // TODO: Do we need to pass in a alignment or can that just be inferred since this is a buffer? minMemoryMapAlignment
-    Manager->StagingOffset = AlignAddress(Manager->StagingOffset, 1);
+    // TODO: If we can get the size of a fromat, we wouldn't need texelsize anymore
+    u64 ImageSize = Width * Height * TexelSize;
+    Manager->StagingOffset = AlignAddress(Manager->StagingOffset, TexelSize);
     Assert(Manager->StagingOffset + ImageSize <= Manager->StagingSize);
     u8* Result = Manager->StagingPtr + Manager->StagingOffset;
 

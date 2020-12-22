@@ -67,7 +67,7 @@ struct vk_render_pass_builder
 {
     temp_mem TempMem;
     linear_arena* Arena;
-
+    
     // NOTE: Attachment Data
     u32 MaxNumAttachments;
     u32 NumAttachments;
@@ -79,6 +79,8 @@ struct vk_render_pass_builder
     VkSubpassDependency* Dependencies;
     
     // NOTE: SubPass data
+    b32 RecordingSubPass;
+    
     u32 MaxNumInputAttachmentRefs;
     u32 NumInputAttachmentRefs;
     VkAttachmentReference* InputAttachmentRefs;
