@@ -78,9 +78,6 @@ struct vk_render_pass_builder
     u32 NumDependencies;
     VkSubpassDependency* Dependencies;
     
-    // NOTE: SubPass data
-    b32 RecordingSubPass;
-    
     u32 MaxNumInputAttachmentRefs;
     u32 NumInputAttachmentRefs;
     VkAttachmentReference* InputAttachmentRefs;

@@ -748,8 +748,6 @@ inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat F
 inline void VkRenderPassSubPassBegin(vk_render_pass_builder* Builder, VkPipelineBindPoint BindPoint)
 {
     Assert(Builder->NumSubPasses < Builder->MaxNumSubPasses);
-
-    Builder->RecordingSubPass = true;
     
     VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
     *SubPass = {};
@@ -802,7 +800,6 @@ inline void VkRenderPassDepthRefAdd(vk_render_pass_builder* Builder, u32 Attachm
 
 inline void VkRenderPassSubPassEnd(vk_render_pass_builder* Builder)
 {
-    Builder->RecordingSubPass = false;
     Builder->NumSubPasses++;
 }
 
@@ -821,14 +818,9 @@ inline void VkRenderPassDependency(vk_render_pass_builder* Builder, VkPipelineSt
     {
         Dependency->srcSubpass = Builder->NumSubPasses - 1;
     }
-    if (Builder->RecordingSubPass)
-    {
-        Dependency->dstSubpass = Builder->NumSubPasses;
-    }
-    else
-    {
-        Dependency->dstSubpass = VK_SUBPASS_EXTERNAL;
-    }
+
+    Dependency->dstSubpass = Builder->NumSubPasses;
+    
     Dependency->srcStageMask = SrcStageFlags;
     Dependency->dstStageMask = DstStageFlags;
     Dependency->srcAccessMask = SrcAccessMask;
@@ -839,6 +831,15 @@ inline void VkRenderPassDependency(vk_render_pass_builder* Builder, VkPipelineSt
 inline VkRenderPass VkRenderPassBuilderEnd(vk_render_pass_builder* Builder, VkDevice Device)
 {
     VkRenderPass Result = {};
+
+    // NOTE: Check if we have to update some dependencies to external for dst
+    for (u32 DependencyId = 0; DependencyId < Builder->NumDependencies; ++DependencyId)
+    {
+        if (Builder->Dependencies[DependencyId].dstSubpass == Builder->NumSubPasses)
+        {
+            Builder->Dependencies[DependencyId].dstSubpass = VK_SUBPASS_EXTERNAL;
+        }
+    }
     
     VkRenderPassCreateInfo RenderPassCreateInfo = {};
     RenderPassCreateInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
