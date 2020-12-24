@@ -357,13 +357,41 @@ inline VkBufferView VkBufferViewCreate(VkDevice Device, VkBuffer Buffer, VkForma
 }
 
 //
+// NOTE: Image View Helpers
+//
+
+inline VkImageView VkImageViewCreate(VkDevice Device, VkImage Image, VkImageViewType ViewType, VkFormat Format,
+                                     VkImageAspectFlags AspectMask, u32 MipLevel, u32 LayerCount)
+{
+    VkImageView Result = {};
+    
+    VkImageViewCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    CreateInfo.image = Image;
+    CreateInfo.viewType = ViewType;
+    CreateInfo.format = Format;
+    CreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    CreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    CreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    CreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    CreateInfo.subresourceRange.aspectMask = AspectMask;
+    CreateInfo.subresourceRange.baseMipLevel = MipLevel;
+    CreateInfo.subresourceRange.levelCount = 1;
+    CreateInfo.subresourceRange.baseArrayLayer = 0;
+    CreateInfo.subresourceRange.layerCount = LayerCount;
+    VkCheckResult(vkCreateImageView(Device, &CreateInfo, 0, &Result));
+
+    return Result;
+}
+
+//
 // NOTE: Image Helpers
 //
 
-inline void VkImage2dCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
-                            VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkImage* OutImage,
-                            VkImageView* OutImageView)
+inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage)
 {
+    VkImage Result = {};
+    
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -378,44 +406,37 @@ inline void VkImage2dCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, 
     ImageCreateInfo.usage = Usage;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, OutImage));
+    VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, &Result));
 
     VkMemoryRequirements ImageMemRequirements;
-    vkGetImageMemoryRequirements(Device, *OutImage, &ImageMemRequirements);
+    vkGetImageMemoryRequirements(Device, Result, &ImageMemRequirements);
     vk_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
-    VkCheckResult(vkBindImageMemory(Device, *OutImage, MemPtr.Memory, MemPtr.Offset));
-
-    // NOTE: Create image view
-    VkImageViewCreateInfo ImgViewCreateInfo = {};
-    ImgViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ImgViewCreateInfo.image = *OutImage;
-    ImgViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    ImgViewCreateInfo.format = Format;
-    ImgViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.subresourceRange.aspectMask = AspectMask;
-    ImgViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    ImgViewCreateInfo.subresourceRange.levelCount = 1;
-    ImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    ImgViewCreateInfo.subresourceRange.layerCount = 1;
-    VkCheckResult(vkCreateImageView(Device, &ImgViewCreateInfo, 0, OutImageView));
-}
-
-inline vk_image VkImage2dCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
-                                VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask)
-{
-    vk_image Result = {};
-    VkImage2dCreate(Device, Arena, Width, Height, Format, Usage, AspectMask, &Result.Image, &Result.View);
+    VkCheckResult(vkBindImageMemory(Device, Result, MemPtr.Memory, MemPtr.Offset));
 
     return Result;
 }
 
-inline vk_image VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format,
-                                VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, u32 MipLevels = 1)
+inline void VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
+                          VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkImage* OutImage,
+                          VkImageView* OutImageView)
+{
+    *OutImage = VkImageCreate(Device, Arena, Width, Height, Format, Usage);
+    *OutImageView = VkImageViewCreate(Device, *OutImage, VK_IMAGE_VIEW_TYPE_2D, Format, AspectMask, 0, 1);
+}
+
+inline vk_image VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
+                              VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask)
 {
     vk_image Result = {};
+    VkImageCreate(Device, Arena, Width, Height, Format, Usage, AspectMask, &Result.Image, &Result.View);
+
+    return Result;
+}
+
+inline VkImage VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
+                               u32 MipLevels)
+{
+    VkImage Result = {};
     
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -432,29 +453,22 @@ inline vk_image VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Wid
     ImageCreateInfo.usage = Usage;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, &Result.Image));
+    VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, &Result));
 
     VkMemoryRequirements ImageMemRequirements;
-    vkGetImageMemoryRequirements(Device, Result.Image, &ImageMemRequirements);
+    vkGetImageMemoryRequirements(Device, Result, &ImageMemRequirements);
     vk_ptr MemPtr = VkPushSize(Arena, ImageMemRequirements.size, ImageMemRequirements.alignment);
-    VkCheckResult(vkBindImageMemory(Device, Result.Image, MemPtr.Memory, MemPtr.Offset));
+    VkCheckResult(vkBindImageMemory(Device, Result, MemPtr.Memory, MemPtr.Offset));
 
-    // NOTE: Create image view
-    VkImageViewCreateInfo ImgViewCreateInfo = {};
-    ImgViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ImgViewCreateInfo.image = Result.Image;
-    ImgViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-    ImgViewCreateInfo.format = Format;
-    ImgViewCreateInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-    ImgViewCreateInfo.subresourceRange.aspectMask = AspectMask;
-    ImgViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    ImgViewCreateInfo.subresourceRange.levelCount = 1;
-    ImgViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    ImgViewCreateInfo.subresourceRange.layerCount = 6;
-    VkCheckResult(vkCreateImageView(Device, &ImgViewCreateInfo, 0, &Result.View));
+    return Result;
+}
+
+inline vk_image VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format,
+                                VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, u32 MipLevels)
+{
+    vk_image Result = {};
+    Result.Image = VkCubeMapCreate(Device, Arena, Width, Height, Format, Usage, MipLevels);
+    Result.View = VkImageViewCreate(Device, Result.Image, VK_IMAGE_VIEW_TYPE_CUBE, Format, AspectMask, 0, 6);
 
     return Result;
 }
