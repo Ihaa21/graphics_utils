@@ -86,6 +86,10 @@ struct vk_render_pass_builder
     u32 NumColorAttachmentRefs;
     VkAttachmentReference* ColorAttachmentRefs;
 
+    u32 MaxNumResolveAttachmentRefs;
+    u32 NumResolveAttachmentRefs;
+    VkAttachmentReference* ResolveAttachmentRefs;
+
     u32 MaxNumDepthAttachmentRefs;
     u32 NumDepthAttachmentRefs;
     VkAttachmentReference* DepthAttachmentRefs;
@@ -271,7 +275,8 @@ struct vk_pipeline_builder
     VkPipelineColorBlendAttachmentState* ColorAttachments;
 
     VkPipelineRasterizationStateCreateInfo RasterizationState;
-    
+    VkPipelineMultisampleStateCreateInfo MultiSampleState;
+
     VkGraphicsPipelineCreateInfo PipelineCreateInfo;
 };
 

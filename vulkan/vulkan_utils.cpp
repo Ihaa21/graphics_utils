@@ -388,7 +388,8 @@ inline VkImageView VkImageViewCreate(VkDevice Device, VkImage Image, VkImageView
 // NOTE: Image Helpers
 //
 
-inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage)
+inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
+                             VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
 {
     VkImage Result = {};
     
@@ -401,7 +402,7 @@ inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width,
     ImageCreateInfo.extent.depth = 1;
     ImageCreateInfo.mipLevels = 1;
     ImageCreateInfo.arrayLayers = 1;
-    ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageCreateInfo.samples = SampleCount;
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.usage = Usage;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -416,19 +417,25 @@ inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width,
     return Result;
 }
 
-inline void VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
-                          VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkImage* OutImage,
-                          VkImageView* OutImageView)
+inline void VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
+                          VkImageAspectFlags AspectMask, VkImage* OutImage, VkImageView* OutImageView)
 {
     *OutImage = VkImageCreate(Device, Arena, Width, Height, Format, Usage);
     *OutImageView = VkImageViewCreate(Device, *OutImage, VK_IMAGE_VIEW_TYPE_2D, Format, AspectMask, 0, 1);
 }
 
-inline vk_image VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height,
-                              VkFormat Format, VkImageUsageFlags Usage, VkImageAspectFlags AspectMask)
+inline void VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
+                          VkImageAspectFlags AspectMask, VkSampleCountFlagBits SampleCount, VkImage* OutImage, VkImageView* OutImageView)
+{
+    *OutImage = VkImageCreate(Device, Arena, Width, Height, Format, Usage, SampleCount);
+    *OutImageView = VkImageViewCreate(Device, *OutImage, VK_IMAGE_VIEW_TYPE_2D, Format, AspectMask, 0, 1);
+}
+
+inline vk_image VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
+                              VkImageAspectFlags AspectMask, VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
 {
     vk_image Result = {};
-    VkImageCreate(Device, Arena, Width, Height, Format, Usage, AspectMask, &Result.Image, &Result.View);
+    VkImageCreate(Device, Arena, Width, Height, Format, Usage, AspectMask, SampleCount, &Result.Image, &Result.View);
 
     return Result;
 }
@@ -696,7 +703,6 @@ inline void VkDescriptorManagerFlush(VkDevice Device, vk_descriptor_manager* Man
 // NOTE: Render Pass Helpers
 //
 
-// TODO: Add support for MSAA
 inline vk_render_pass_builder VkRenderPassBuilderBegin(linear_arena* Arena)
 {
     vk_render_pass_builder Result = {};
@@ -716,6 +722,9 @@ inline vk_render_pass_builder VkRenderPassBuilderBegin(linear_arena* Arena)
     Result.MaxNumColorAttachmentRefs = 100;
     Result.ColorAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumColorAttachmentRefs);
 
+    Result.MaxNumResolveAttachmentRefs = 100;
+    Result.ResolveAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumResolveAttachmentRefs);
+
     Result.MaxNumDepthAttachmentRefs = 10;
     Result.DepthAttachmentRefs = PushArray(Arena, VkAttachmentReference, Result.MaxNumDepthAttachmentRefs);
 
@@ -725,8 +734,9 @@ inline vk_render_pass_builder VkRenderPassBuilderBegin(linear_arena* Arena)
     return Result;
 }
 
-inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat Format, VkAttachmentLoadOp LoadOp,
-                                     VkAttachmentStoreOp StoreOp, VkImageLayout InitialLayout, VkImageLayout FinalLayout)
+inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat Format, VkSampleCountFlagBits SampleCount,
+                                     VkAttachmentLoadOp LoadOp, VkAttachmentStoreOp StoreOp, VkImageLayout InitialLayout,
+                                     VkImageLayout FinalLayout)
 {
     Assert(Builder->NumAttachments < Builder->MaxNumAttachments);
 
@@ -734,7 +744,7 @@ inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat F
     VkAttachmentDescription* Color = Builder->Attachments + Id;
     Color->flags = 0;
     Color->format = Format;
-    Color->samples = VK_SAMPLE_COUNT_1_BIT;
+    Color->samples = SampleCount;
     Color->loadOp = LoadOp;
     Color->storeOp = StoreOp;
     Color->stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -743,6 +753,13 @@ inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat F
     Color->finalLayout = FinalLayout;
 
     return Id;
+}
+
+inline u32 VkRenderPassAttachmentAdd(vk_render_pass_builder* Builder, VkFormat Format, VkAttachmentLoadOp LoadOp,
+                                     VkAttachmentStoreOp StoreOp, VkImageLayout InitialLayout, VkImageLayout FinalLayout)
+{
+    u32 Result = VkRenderPassAttachmentAdd(Builder, Format, VK_SAMPLE_COUNT_1_BIT, LoadOp, StoreOp, InitialLayout, FinalLayout);
+    return Result;
 }
 
 inline void VkRenderPassSubPassBegin(vk_render_pass_builder* Builder, VkPipelineBindPoint BindPoint)
@@ -781,6 +798,31 @@ inline void VkRenderPassColorRefAdd(vk_render_pass_builder* Builder, u32 Attachm
     Reference->layout = Layout;
     
     VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
+    SubPass->colorAttachmentCount += 1;
+}
+
+inline void VkRenderPassColorResolveRefAdd(vk_render_pass_builder* Builder, u32 ColorId, u32 ResolveId, VkImageLayout Layout)
+{
+    Assert(Builder->NumColorAttachmentRefs < Builder->MaxNumColorAttachmentRefs);
+    Assert(ColorId < Builder->NumAttachments);
+    Assert(ResolveId < Builder->NumAttachments);
+
+    VkAttachmentReference* ColorReference = Builder->ColorAttachmentRefs + Builder->NumColorAttachmentRefs++;
+    *ColorReference = {};
+    ColorReference->attachment = ColorId;
+    ColorReference->layout = Layout;
+
+    VkAttachmentReference* ResolveReference = Builder->ResolveAttachmentRefs + Builder->NumResolveAttachmentRefs++;
+    *ResolveReference = {};
+    ResolveReference->attachment = ResolveId;
+    ResolveReference->layout = Layout;
+
+    // NOTE: If first resolve attachment, add it to our subpass
+    VkSubpassDescription* SubPass = Builder->SubPasses + Builder->NumSubPasses;
+    if (!SubPass->pResolveAttachments)
+    {
+        SubPass->pResolveAttachments = Builder->ResolveAttachmentRefs + Builder->NumResolveAttachmentRefs - 1;
+    }
     SubPass->colorAttachmentCount += 1;
 }
 
@@ -1352,6 +1394,15 @@ inline vk_pipeline_builder VkPipelineBuilderBegin(linear_arena* Arena)
     Result.RasterizationState.depthBiasSlopeFactor = 0.0f;
     Result.RasterizationState.lineWidth = 1.0f;
     
+    // NOTE: Set the multi sampling state
+    Result.MultiSampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    Result.MultiSampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    Result.MultiSampleState.sampleShadingEnable = VK_FALSE;
+    Result.MultiSampleState.minSampleShading = 1.0f;
+    Result.MultiSampleState.pSampleMask = 0;
+    Result.MultiSampleState.alphaToCoverageEnable = VK_FALSE;
+    Result.MultiSampleState.alphaToOneEnable = VK_FALSE;
+
     // NOTE: Set some default values
     VkPipelineInputAssemblyAdd(&Result, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_FALSE);
     
@@ -1479,6 +1530,17 @@ inline void VkPipelineRasterizationStateSet(vk_pipeline_builder* Builder, VkBool
     Builder->RasterizationState.frontFace = FrontFace;
 }
 
+inline void VkPipelineMsaaStateSet(vk_pipeline_builder* Builder, VkSampleCountFlagBits SampleCount, VkBool32 SampleShadingEnabled)
+{
+    // NOTE: Set the multi sampling state
+    Builder->MultiSampleState.rasterizationSamples = SampleCount;
+    Builder->MultiSampleState.sampleShadingEnable = SampleShadingEnabled;
+    Builder->MultiSampleState.minSampleShading = 1.0f;
+    Builder->MultiSampleState.pSampleMask = 0;
+    Builder->MultiSampleState.alphaToCoverageEnable = VK_FALSE;
+    Builder->MultiSampleState.alphaToOneEnable = VK_FALSE;
+}
+
 inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice Device, vk_pipeline_manager* Manager,
                                          VkRenderPass RenderPass, u32 SubPassId, VkDescriptorSetLayout* Layouts, u32 NumLayouts)
 {
@@ -1499,17 +1561,6 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
     ViewPortStateCreateInfo.pViewports = 0;
     ViewPortStateCreateInfo.scissorCount = 1;
     ViewPortStateCreateInfo.pScissors = 0;
-
-    // TODO: This should be specified but make more pipeliens and see how to break it up
-    // NOTE: Set the multi sampling state
-    VkPipelineMultisampleStateCreateInfo MultiSampleStateCreateInfo = {};
-    MultiSampleStateCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultiSampleStateCreateInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    MultiSampleStateCreateInfo.sampleShadingEnable = VK_FALSE;
-    MultiSampleStateCreateInfo.minSampleShading = 1.0f;
-    MultiSampleStateCreateInfo.pSampleMask = 0;
-    MultiSampleStateCreateInfo.alphaToCoverageEnable = VK_FALSE;
-    MultiSampleStateCreateInfo.alphaToOneEnable = VK_FALSE;
 
     // TODO: This might need to be configurable
     // NOTE: Set the blending state
@@ -1549,7 +1600,7 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
     {
         PipelineCreateInfo.pDepthStencilState = &Builder->DepthStencil;
     }
-    PipelineCreateInfo.pMultisampleState = &MultiSampleStateCreateInfo;
+    PipelineCreateInfo.pMultisampleState = &Builder->MultiSampleState;
     PipelineCreateInfo.pColorBlendState = &ColorBlendStateCreateInfo;
     PipelineCreateInfo.pDynamicState = &DynamicStateCreateInfo;
     PipelineCreateInfo.renderPass = RenderPass;
