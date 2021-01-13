@@ -1504,14 +1504,14 @@ inline void VkPipelineStencilStateAdd(vk_pipeline_builder* Builder, VkStencilOpS
     Builder->DepthStencil.back = Back;
 }
 
-inline void VkPipelineColorAttachmentAdd(vk_pipeline_builder* Builder, VkBool32 ColorEnable, VkBlendOp ColorBlend, VkBlendFactor SrcColor,
-                                         VkBlendFactor DstColor, VkBlendOp AlphaBlend, VkBlendFactor SrcAlpha, VkBlendFactor DstAlpha,
+inline void VkPipelineColorAttachmentAdd(vk_pipeline_builder* Builder, VkBlendOp ColorBlend, VkBlendFactor SrcColor, VkBlendFactor DstColor,
+                                         VkBlendOp AlphaBlend, VkBlendFactor SrcAlpha, VkBlendFactor DstAlpha,
                                          VkColorComponentFlags WriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT)
 {
     Assert(Builder->NumColorAttachments < Builder->MaxNumColorAttachments);
 
     VkPipelineColorBlendAttachmentState* ColorAttachment = Builder->ColorAttachments + Builder->NumColorAttachments++;
-    ColorAttachment->blendEnable = ColorEnable;
+    ColorAttachment->blendEnable = VK_TRUE;
     ColorAttachment->srcColorBlendFactor = SrcColor;
     ColorAttachment->dstColorBlendFactor = DstColor;
     ColorAttachment->colorBlendOp = ColorBlend;
