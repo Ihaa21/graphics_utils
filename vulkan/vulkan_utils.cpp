@@ -513,6 +513,7 @@ inline void VkDescriptorLayoutEnd(VkDevice Device, vk_descriptor_layout_builder*
 
 inline vk_descriptor_manager VkDescriptorManagerCreate(linear_arena* Arena, u32 MaxNumWrites)
 {
+    // TODO: Use a resizable array!
     vk_descriptor_manager Result = {};
 
     u32 ArenaSize = (sizeof(VkWriteDescriptorSet)*MaxNumWrites +
@@ -557,7 +558,7 @@ inline void VkDescriptorTexelBufferWrite(vk_descriptor_manager* Manager, VkDescr
     DsWrite->pTexelBufferView = BufferView;
 }
 
-inline void VkDescriptorImageWrite(vk_descriptor_manager* Manager, VkDescriptorSet Set, u32 Binding,
+inline void VkDescriptorImageWrite(vk_descriptor_manager* Manager, VkDescriptorSet Set, u32 Binding, u32 ArrayElementId,
                                    VkDescriptorType DescType, VkImageView ImageView, VkSampler Sampler,
                                    VkImageLayout ImageLayout)
 {
@@ -572,9 +573,17 @@ inline void VkDescriptorImageWrite(vk_descriptor_manager* Manager, VkDescriptorS
     DsWrite->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     DsWrite->dstSet = Set;
     DsWrite->dstBinding = Binding;
+    DsWrite->dstArrayElement = ArrayElementId;
     DsWrite->descriptorCount = 1;
     DsWrite->descriptorType = DescType;
     DsWrite->pImageInfo = ImageInfo;
+}
+
+inline void VkDescriptorImageWrite(vk_descriptor_manager* Manager, VkDescriptorSet Set, u32 Binding,
+                                   VkDescriptorType DescType, VkImageView ImageView, VkSampler Sampler,
+                                   VkImageLayout ImageLayout)
+{
+    VkDescriptorImageWrite(Manager, Set, Binding, 0, DescType, ImageView, Sampler, ImageLayout);
 }
 
 inline void VkDescriptorManagerFlush(VkDevice Device, vk_descriptor_manager* Manager)

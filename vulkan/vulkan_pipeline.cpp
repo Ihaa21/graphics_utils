@@ -192,6 +192,10 @@ inline vk_pipeline* VkPipelineGraphicsCreate(VkDevice Device, vk_pipeline_manage
             }
             
             GraphicsEntry->RasterizationState = *PipelineCreateInfo->pRasterizationState;
+            if (PipelineCreateInfo->pRasterizationState->pNext)
+            {
+                GraphicsEntry->ConservativeState = *(VkPipelineRasterizationConservativeStateCreateInfoEXT*)PipelineCreateInfo->pRasterizationState->pNext;
+            }
             GraphicsEntry->MultisampleState = *PipelineCreateInfo->pMultisampleState;
             
             GraphicsEntry->ColorBlendState = *PipelineCreateInfo->pColorBlendState;
@@ -381,6 +385,8 @@ inline vk_pipeline_builder VkPipelineBuilderBegin(linear_arena* Arena)
     Result.RasterizationState.depthBiasClamp = 0.0f;
     Result.RasterizationState.depthBiasSlopeFactor = 0.0f;
     Result.RasterizationState.lineWidth = 1.0f;
+
+    Result.ConservativeState = {};
     
     // NOTE: Set the multi sampling state
     Result.MultiSampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -413,6 +419,17 @@ inline void VkPipelineVertexBindingBegin(vk_pipeline_builder* Builder)
     VkVertexInputBindingDescription* VertexBinding = Builder->VertexBindings + Builder->NumVertexBindings;
     VertexBinding->binding = Builder->NumVertexBindings++;
     VertexBinding->inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    Builder->CurrVertexBindingSize = 0;
+}
+
+inline void VkPipelineInstanceBindingBegin(vk_pipeline_builder* Builder)
+{
+    Assert(Builder->NumVertexBindings < Builder->MaxNumVertexBindings);
+    
+    VkVertexInputBindingDescription* VertexBinding = Builder->VertexBindings + Builder->NumVertexBindings;
+    VertexBinding->binding = Builder->NumVertexBindings++;
+    VertexBinding->inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
     Builder->CurrVertexBindingSize = 0;
 }
@@ -518,6 +535,31 @@ inline void VkPipelineRasterizationStateSet(vk_pipeline_builder* Builder, VkBool
     Builder->RasterizationState.frontFace = FrontFace;
 }
 
+inline void VkPipelineConservativeStateSet(vk_pipeline_builder* Builder, f32 PixelsIncrease)
+{
+#if 0
+    Builder->ConservativeState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT;
+    if (PixelsIncrease > 0)
+    {
+        Builder->ConservativeState.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+    }
+    else if (PixelsIncrease == 0)
+    {
+        Builder->ConservativeState.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_DISABLED_EXT;
+    }
+    else
+    {
+        Builder->ConservativeState.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_UNDERESTIMATE_EXT;
+    }
+    Builder->ConservativeState.extraPrimitiveOverestimationSize = PixelsIncrease;
+#endif
+
+    // TODO: TEST
+    Builder->ConservativeState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT;
+    Builder->ConservativeState.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_UNDERESTIMATE_EXT;
+    Builder->ConservativeState.extraPrimitiveOverestimationSize = 0;
+}
+
 inline void VkPipelineMsaaStateSet(vk_pipeline_builder* Builder, VkSampleCountFlagBits SampleCount, VkBool32 SampleShadingEnabled)
 {
     // NOTE: Set the multi sampling state
@@ -584,6 +626,10 @@ inline vk_pipeline* VkPipelineBuilderEnd(vk_pipeline_builder* Builder, VkDevice 
     PipelineCreateInfo.pInputAssemblyState = &Builder->InputAssembly;
     PipelineCreateInfo.pViewportState = &ViewPortStateCreateInfo;
     PipelineCreateInfo.pRasterizationState = &Builder->RasterizationState;
+    if (Builder->ConservativeState.sType != 0)
+    {
+        Builder->RasterizationState.pNext = &Builder->ConservativeState;
+    }
     if (Builder->Flags & VkPipelineFlag_HasDepthStencil)
     {
         PipelineCreateInfo.pDepthStencilState = &Builder->DepthStencil;

@@ -40,6 +40,7 @@ struct vk_pipeline_graphics_entry
     VkPipelineViewportStateCreateInfo ViewportState;
     
     VkPipelineRasterizationStateCreateInfo RasterizationState;
+    VkPipelineRasterizationConservativeStateCreateInfoEXT ConservativeState;
     VkPipelineMultisampleStateCreateInfo MultisampleState;    
     VkPipelineDepthStencilStateCreateInfo DepthStencilState;
 
@@ -134,6 +135,7 @@ struct vk_pipeline_builder
     VkPipelineColorBlendAttachmentState* ColorAttachments;
 
     VkPipelineRasterizationStateCreateInfo RasterizationState;
+    VkPipelineRasterizationConservativeStateCreateInfoEXT ConservativeState;
     VkPipelineMultisampleStateCreateInfo MultiSampleState;
 
     VkGraphicsPipelineCreateInfo PipelineCreateInfo;
