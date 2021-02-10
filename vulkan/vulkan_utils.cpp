@@ -39,7 +39,7 @@ inline VkClearValue VkClearDepthStencilCreate(f32 Depth, u32 Stencil)
    NOTE: Vulkan coordinate system:
 
      - Camera space: x points left, y points up, z points away
-     - Screen space: x[-1:1] points left, y[-1:1] points down, z[0:1] points away
+     - Screen space: x[-1:1] points left, y[-1:1] points down, z[1:0] points away
 
      The games coordinate systems are as follows:
 
@@ -53,10 +53,10 @@ inline m4 VkOrthoProjM4(f32 Left, f32 Right, f32 Top, f32 Bottom, f32 Near, f32 
     m4 Result = {};
     Result.v[0].x = 2.0f / (Right - Left);
     Result.v[1].y = 2.0f / (Bottom - Top);
-    Result.v[2].z = 1.0f / (Far - Near);
+    Result.v[2].z = 1.0f / (Near - Far);
     Result.v[3].x = -(Left + Right) / (Right - Left);
     Result.v[3].y = -(Bottom + Top) / (Bottom - Top);
-    Result.v[3].z = (-Near) / (Far - Near);
+    Result.v[3].z = (-Far) / (Near - Far);
     Result.v[3].w = 1.0f;
 
     return Result;
