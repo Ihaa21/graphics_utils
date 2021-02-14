@@ -119,6 +119,8 @@ struct vk_image_transfer
 
     VkImageAspectFlags AspectMask;
     VkImage Image;
+    u32 OffsetX;
+    u32 OffsetY;
     u32 Width;
     u32 Height;
     

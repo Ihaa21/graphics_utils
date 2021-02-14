@@ -165,20 +165,27 @@ inline vk_ptr VkBufferBindMemory(VkDevice Device, vk_linear_arena* Arena, VkBuff
     return Result;
 }
 
+inline void VkBufferCreate(VkDevice Device, VkDeviceMemory Memory, VkBufferUsageFlags Usage,
+                           u64 BufferSize, VkBuffer* OutBuffer)
+{
+    *OutBuffer = VkBufferHandleCreate(Device, Usage, BufferSize);
+    VkMemoryRequirements MemoryRequirements = VkBufferGetMemoryRequirements(Device, *OutBuffer);
+    VkCheckResult(vkBindBufferMemory(Device, *OutBuffer, Memory, 0));
+}
+
 inline void VkBufferCreate(VkDevice Device, vk_linear_arena* Arena, VkBufferUsageFlags Usage,
                            u64 BufferSize, VkBuffer* OutBuffer, vk_ptr* OutGpuPtr)
 {
-    VkBufferCreateInfo BufferCreateInfo = {};
-    BufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    BufferCreateInfo.size = BufferSize;
-    BufferCreateInfo.usage = Usage;
-    BufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    BufferCreateInfo.queueFamilyIndexCount = 0;
-    BufferCreateInfo.pQueueFamilyIndices = 0;
-    VkCheckResult(vkCreateBuffer(Device, &BufferCreateInfo, 0, OutBuffer));
-
+    *OutBuffer = VkBufferHandleCreate(Device, Usage, BufferSize);
     VkMemoryRequirements MemoryRequirements = VkBufferGetMemoryRequirements(Device, *OutBuffer);
     *OutGpuPtr = VkBufferBindMemory(Device, Arena, *OutBuffer, MemoryRequirements);
+}
+
+inline VkBuffer VkBufferCreate(VkDevice Device, VkDeviceMemory Memory, VkBufferUsageFlags Usage, u64 BufferSize)
+{
+    VkBuffer Result = {};
+    VkBufferCreate(Device, Memory, Usage, BufferSize, &Result);
+    return Result;
 }
 
 inline VkBuffer VkBufferCreate(VkDevice Device, vk_linear_arena* Arena, VkBufferUsageFlags Usage,
@@ -1006,8 +1013,8 @@ inline u8* VkTransferPushWrite(vk_transfer_manager* Manager, VkBuffer Buffer, u6
     return Result;
 }
 
-inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image, u32 Width, u32 Height, mm TexelSize, 
-                                    VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
+inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image, u32 OffsetX, u32 OffsetY, u32 Width, u32 Height,
+                                    mm TexelSize, VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
                                     barrier_mask InputMask, barrier_mask OutputMask)
 {
     // TODO: If we can get the size of a fromat, we wouldn't need texelsize anymore
@@ -1019,6 +1026,8 @@ inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image,
     vk_image_transfer* Transfer = Manager->ImageTransferArray + Manager->NumImageTransfers++;
     Transfer->StagingOffset = Manager->StagingOffset;
     Transfer->Image = Image;
+    Transfer->OffsetX = OffsetX;
+    Transfer->OffsetY = OffsetY;
     Transfer->Width = Width;
     Transfer->Height = Height;
     Transfer->AspectMask = AspectMask;
@@ -1028,6 +1037,15 @@ inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image,
     Transfer->OutputLayout = OutputLayout;
     
     Manager->StagingOffset += ImageSize;
+    return Result;
+}
+
+inline u8* VkTransferPushWriteImage(vk_transfer_manager* Manager, VkImage Image, u32 Width, u32 Height, mm TexelSize, 
+                                    VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
+                                    barrier_mask InputMask, barrier_mask OutputMask)
+{
+    u8* Result = VkTransferPushWriteImage(Manager, Image, 0, 0, Width, Height, TexelSize, AspectMask, InputLayout, OutputLayout,
+                                          InputMask, OutputMask);
     return Result;
 }
 
@@ -1099,8 +1117,8 @@ inline void VkTransferManagerFlush(vk_transfer_manager* Manager, VkDevice Device
             ImageCopy.imageSubresource.mipLevel = 0;
             ImageCopy.imageSubresource.baseArrayLayer = 0;
             ImageCopy.imageSubresource.layerCount = 1;
-            ImageCopy.imageOffset.x = 0;
-            ImageCopy.imageOffset.y = 0;
+            ImageCopy.imageOffset.x = ImageTransfer.OffsetX;
+            ImageCopy.imageOffset.y = ImageTransfer.OffsetY;
             ImageCopy.imageOffset.z = 0;
             ImageCopy.imageExtent.width = ImageTransfer.Width;
             ImageCopy.imageExtent.height = ImageTransfer.Height;
