@@ -383,7 +383,8 @@ inline void VkImageDestroy(VkDevice Device, vk_image Image)
 // NOTE: Sampler Helpers
 //
 
-inline VkSampler VkSamplerCreate(VkDevice Device, VkFilter Filter, VkSamplerAddressMode AddressMode, f32 Ansitropy)
+inline VkSampler VkSamplerCreate(VkDevice Device, VkFilter Filter, VkSamplerAddressMode AddressMode, VkBorderColor BorderColor,
+                                 f32 Ansitropy)
 {
     VkSamplerCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -399,7 +400,7 @@ inline VkSampler VkSamplerCreate(VkDevice Device, VkFilter Filter, VkSamplerAddr
     CreateInfo.mipLodBias = 0;
     CreateInfo.minLod = 0;
     CreateInfo.maxLod = 0;
-    CreateInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    CreateInfo.borderColor = BorderColor;
     CreateInfo.unnormalizedCoordinates = VK_FALSE;
 
     VkSampler Result = {};
