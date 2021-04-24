@@ -23,6 +23,10 @@ struct vk_temp_mem
     u64 Used;
 };
 
+//
+// NOTE: Dynamic Arena
+//
+
 struct vk_dynamic_arena_header
 {
     VkDeviceMemory GpuMemory;
@@ -45,3 +49,35 @@ struct vk_dynamic_temp_mem
     mm GpuUsed;
 };
 
+//
+// NOTE: Staging Arena
+//
+
+struct vk_staging_arena_header
+{
+    // NOTE: Stored at the top of pages
+    vk_staging_arena_header* Next;
+    vk_staging_arena_header* Prev;
+    VkDeviceMemory GpuMemory;
+    VkBuffer GpuBuffer;
+    mm Used;
+    mm Size;
+};
+
+struct vk_staging_ptr
+{
+    u8* Ptr;
+    VkBuffer Buffer;
+    u64 Offset;
+};
+
+struct vk_staging_arena
+{
+    // IMPORTANT: We don't do a sentinel cuz then we can't return by value
+    vk_staging_arena_header* Prev;
+    vk_staging_arena_header* Next;
+    mm MinBlockSize;
+    u32 StagingTypeId;
+
+    VkDevice Device;
+};

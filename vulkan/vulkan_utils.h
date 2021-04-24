@@ -3,6 +3,7 @@
 #include "math\math.h"
 #include "vulkan_memory.h"
 #include "vulkan_pipeline.h"
+#include "vulkan_cmd_buffer.h"
 
 //
 // NOTE: Descriptor Layout Builder
@@ -58,34 +59,6 @@ struct vk_render_pass_builder
 };
 
 //
-// NOTE: Barrier Manager
-//
-
-struct barrier_mask
-{
-    VkAccessFlags AccessMask;
-    VkPipelineStageFlags StageMask;
-};
-
-struct vk_barrier_manager
-{
-    u32 MaxNumMemoryBarriers;
-    u32 NumMemoryBarriers;
-    VkMemoryBarrier* MemoryBarrierArray;
-
-    u32 MaxNumImageBarriers;
-    u32 NumImageBarriers;
-    VkImageMemoryBarrier* ImageBarrierArray;
-
-    u32 MaxNumBufferBarriers;
-    u32 NumBufferBarriers;
-    VkBufferMemoryBarrier* BufferBarrierArray;
-
-    VkPipelineStageFlags SrcStageFlags;
-    VkPipelineStageFlags DstStageFlags;
-};
-
-//
 // NOTE: Descriptor Updater
 //
 
@@ -99,73 +72,8 @@ struct vk_descriptor_manager
 };
 
 //
-// NOTE: Transfer updater
-//
-
-struct vk_buffer_transfer
-{
-    VkBuffer Buffer;
-    u64 DstOffset;
-    u64 Size;
-    u64 StagingOffset;
-
-    barrier_mask InputMask;
-    barrier_mask OutputMask;
-};
-
-struct vk_image_transfer
-{
-    u64 StagingOffset;
-
-    VkImageAspectFlags AspectMask;
-    VkImage Image;
-    u32 OffsetX;
-    u32 OffsetY;
-    u32 Width;
-    u32 Height;
-    
-    barrier_mask InputMask;
-    VkImageLayout InputLayout;
-
-    barrier_mask OutputMask;
-    VkImageLayout OutputLayout;
-};
-
-// TODO: Add resource reading 
-struct vk_transfer_manager
-{
-    linear_arena Arena;
-
-    // NOTE: Vk Constants
-    u64 FlushAlignment;
-    
-    // NOTE: Staging data
-    u64 StagingSize;
-    u64 StagingOffset;
-    u8* StagingPtr;
-    VkDeviceMemory StagingMem;
-    VkBuffer StagingBuffer;
-
-    // NOTE: Buffer data
-    u32 MaxNumBufferTransfers;
-    u32 NumBufferTransfers;
-    vk_buffer_transfer* BufferTransferArray;
-    
-    // NOTE: Image data
-    u32 MaxNumImageTransfers;
-    u32 NumImageTransfers;
-    vk_image_transfer* ImageTransferArray;
-};
-
-//
 // NOTE: Helper structs
 //
-
-struct vk_commands
-{
-    VkCommandBuffer Buffer;
-    VkFence Fence;
-};
 
 struct vk_image
 {
@@ -174,7 +82,10 @@ struct vk_image
 };
 
 internal void VkCheckResult(VkResult Result);
+inline VkBuffer VkBufferHandleCreate(VkDevice Device, VkBufferUsageFlags Usage, u64 BufferSize);
+inline VkMemoryRequirements VkBufferGetMemoryRequirements(VkDevice Device, VkBuffer Buffer);
 
 #include "vulkan_memory.cpp"
 #include "vulkan_pipeline.cpp"
+#include "vulkan_cmd_buffer.cpp"
 #include "vulkan_utils.cpp"

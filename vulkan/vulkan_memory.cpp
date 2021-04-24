@@ -190,3 +190,108 @@ inline void VkEndTempMem(VkDevice Device, vk_dynamic_temp_mem TempMem)
         }
     }
 }
+
+//
+// NOTE: Staging Arena
+//
+
+inline mm VkStagingArenaGetBlockSize(mm AllocSize)
+{
+    // NOTE: We allocate to nearest page size, so +1 to fit the header
+    // TODO: Get page size on other platforms here
+    mm PageSize = KiloBytes(4);
+    mm NumPages = mm(CeilF32(f32(AllocSize) / f32(PageSize))) + 1;
+    mm Result = PageSize * NumPages;
+
+    return Result;
+}
+
+inline vk_staging_arena VkStagingArenaCreate(VkDevice Device, mm MinBlockSize, mm FlushAlignment, u32 StagingTypeId)
+{
+    vk_staging_arena Result = {};
+    Result.MinBlockSize = AlignAddress(MinBlockSize, FlushAlignment);
+    Result.StagingTypeId = StagingTypeId;
+    Result.Device = Device;
+
+    return Result;
+}
+
+// TODO: Make size/used be hidden? Or just don't use push to put the header, it complicates eveyrthing
+inline mm VkStagingArenaHeaderGetSize(vk_staging_arena_header* Header)
+{
+    mm Result = Header->Used - sizeof(*Header);
+    return Result;
+}
+
+inline void* VkStagingArenaHeaderGetData(vk_staging_arena_header* Header)
+{
+    // TODO: We don't take into account alignment here, its probably better to move headers to the bottom so alignment is more predictable
+    void* Result = (void*)(Header + 1);
+    return Result;
+}
+
+inline vk_staging_ptr VkStagingPushSize(vk_staging_arena* Arena, mm Size, mm Alignment = 1)
+{
+    vk_staging_ptr Result = {};
+    vk_staging_arena_header* Header = Arena->Prev;
+    
+    // IMPORTANT: Default Alignment = 4 since ARM requires it
+    mm AlignedOffset = Header ? AlignAddress(Header->Used, Alignment) : 0;
+    if (!Header || (AlignedOffset + Size) > Header->Size)
+    {
+        // NOTE: Allocate a new staging block
+        mm AllocSize = Arena->MinBlockSize;
+        if (Size > Arena->MinBlockSize)
+        {
+            AllocSize = Size + sizeof(vk_staging_arena_header);
+        }
+        
+        VkDeviceMemory GpuMemory = VkMemoryAllocate(Arena->Device, Arena->StagingTypeId, AllocSize);
+        VkBuffer GpuBuffer = VkBufferHandleCreate(Arena->Device, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, AllocSize);
+        VkMemoryRequirements BufferMemRequirements = VkBufferGetMemoryRequirements(Arena->Device, GpuBuffer);
+        
+        u8* StagingPtr = 0;
+        VkCheckResult(vkBindBufferMemory(Arena->Device, GpuBuffer, GpuMemory, 0));
+        VkCheckResult(vkMapMemory(Arena->Device, GpuMemory, 0, BufferMemRequirements.size, 0, (void**)&StagingPtr));
+
+        // NOTE: Create the header inside of the staging buffer ptr
+        vk_staging_arena_header* NewHeader = (vk_staging_arena_header*)StagingPtr;
+        NewHeader->GpuMemory = GpuMemory;
+        NewHeader->GpuBuffer = GpuBuffer;
+        NewHeader->Used = sizeof(vk_staging_arena_header);
+        NewHeader->Size = BufferMemRequirements.size;
+        
+        DoubleListAppend(Arena, NewHeader, Next, Prev);
+        Header = NewHeader;
+        AlignedOffset = AlignAddress(Header->Used, Alignment);
+    }
+
+    // NOTE: Save data into Result
+    Result.Buffer = Header->GpuBuffer;
+    Result.Offset = AlignedOffset;
+    
+    // NOTE: Suballocate a page
+    u8* BasePtr = (u8*)Header;
+    Result.Ptr = BasePtr + AlignedOffset;
+    Header->Used = AlignedOffset + Size;
+    
+    return Result;
+}
+
+inline void ArenaClear(vk_staging_arena* Arena)
+{
+    for (vk_staging_arena_header* Header = Arena->Next;
+         Header;
+         )
+    {
+        vk_staging_arena_header* CurrHeader = Header;
+        Header = Header->Next;        
+        DoubleListRemove(Arena, CurrHeader, Next, Prev);
+
+        // NOTE: Destroy the GPU data
+        VkDeviceMemory GpuMemory = CurrHeader->GpuMemory;
+        VkBuffer GpuBuffer = CurrHeader->GpuBuffer;
+        vkDestroyBuffer(Arena->Device, GpuBuffer, 0);
+        vkFreeMemory(Arena->Device, GpuMemory, 0);
+    }
+}
