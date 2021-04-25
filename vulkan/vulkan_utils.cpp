@@ -199,6 +199,102 @@ inline VkImageView VkImageViewCreate(VkDevice Device, VkImage Image, VkImageView
 // NOTE: Image Helpers
 //
 
+inline VkMemoryRequirements VkImageGetMemoryRequirements(VkDevice Device, VkImage Image)
+{
+    VkMemoryRequirements Result;
+    vkGetImageMemoryRequirements(Device, Image, &Result);
+    return Result;
+}    
+
+inline vk_ptr VkImageBindMemory(VkDevice Device, vk_linear_arena* Arena, VkImage Image, VkMemoryRequirements Requirements)
+{
+    vk_ptr Result = VkPushSize(Arena, Requirements.size, Requirements.alignment);
+    VkCheckResult(vkBindImageMemory(Device, Image, Result.Memory, Result.Offset));
+
+    return Result;
+}
+
+inline void VkImageDestroy(VkDevice Device, vk_image Image)
+{
+    vkDestroyImageView(Device, Image.View, 0);
+    vkDestroyImage(Device, Image.Image, 0);
+}
+
+//
+// NOTE: Image 3d Helpers
+//
+
+inline VkImage VkImageHandleCreate(VkDevice Device, u32 Width, u32 Height, u32 Depth, VkFormat Format, VkImageUsageFlags Usage,
+                                   VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
+{
+    VkImage Result = {};
+    
+    VkImageCreateInfo ImageCreateInfo = {};
+    ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageCreateInfo.imageType = VK_IMAGE_TYPE_3D;
+    ImageCreateInfo.format = Format;
+    ImageCreateInfo.extent.width = Width;
+    ImageCreateInfo.extent.height = Height;
+    ImageCreateInfo.extent.depth = Depth;
+    ImageCreateInfo.mipLevels = 1;
+    ImageCreateInfo.arrayLayers = 1;
+    ImageCreateInfo.samples = SampleCount;
+    ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageCreateInfo.usage = Usage;
+    ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkCheckResult(vkCreateImage(Device, &ImageCreateInfo, 0, &Result));
+
+    return Result;
+}
+
+inline void VkImageHandleCreate(VkDevice Device, u32 Width, u32 Height, u32 Depth, VkFormat Format, VkImageUsageFlags Usage,
+                                VkImageAspectFlags AspectMask, VkSampleCountFlagBits SampleCount, VkImage* OutImage, VkImageView* OutImageView)
+{
+    *OutImage = VkImageHandleCreate(Device, Width, Height, Depth, Format, Usage, SampleCount);
+    *OutImageView = VkImageViewCreate(Device, *OutImage, VK_IMAGE_VIEW_TYPE_3D, Format, AspectMask, 0, 1);
+}
+
+inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, u32 Depth, VkFormat Format,
+                             VkImageUsageFlags Usage, VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
+{
+    VkImage Result = VkImageHandleCreate(Device, Width, Height, Depth, Format, Usage, SampleCount);
+
+    VkMemoryRequirements MemoryRequirements = VkImageGetMemoryRequirements(Device, Result);
+    VkImageBindMemory(Device, Arena, Result, MemoryRequirements);
+
+    return Result;
+}
+
+inline void VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, u32 Depth, VkFormat Format,
+                          VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkImage* OutImage, VkImageView* OutImageView)
+{
+    *OutImage = VkImageCreate(Device, Arena, Width, Height, Depth, Format, Usage);
+    *OutImageView = VkImageViewCreate(Device, *OutImage, VK_IMAGE_VIEW_TYPE_3D, Format, AspectMask, 0, 1);
+}
+
+inline void VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, u32 Depth, VkFormat Format,
+                          VkImageUsageFlags Usage, VkImageAspectFlags AspectMask, VkSampleCountFlagBits SampleCount, VkImage* OutImage,
+                          VkImageView* OutImageView)
+{
+    *OutImage = VkImageCreate(Device, Arena, Width, Height, Depth, Format, Usage, SampleCount);
+    *OutImageView = VkImageViewCreate(Device, *OutImage, VK_IMAGE_VIEW_TYPE_3D, Format, AspectMask, 0, 1);
+}
+
+inline vk_image VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, u32 Depth, VkFormat Format,
+                              VkImageUsageFlags Usage, VkImageAspectFlags AspectMask,
+                              VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
+{
+    vk_image Result = {};
+    VkImageCreate(Device, Arena, Width, Height, Depth, Format, Usage, AspectMask, SampleCount, &Result.Image, &Result.View);
+
+    return Result;
+}
+
+//
+// NOTE: Image 2d Helpers
+//
+
 inline VkImage VkImageHandleCreate(VkDevice Device, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
                                    VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
 {
@@ -239,21 +335,6 @@ inline vk_image VkImageHandleCreate(VkDevice Device, u32 Width, u32 Height, VkFo
     return Result;
 }
 
-inline VkMemoryRequirements VkImageGetMemoryRequirements(VkDevice Device, VkImage Image)
-{
-    VkMemoryRequirements Result;
-    vkGetImageMemoryRequirements(Device, Image, &Result);
-    return Result;
-}    
-
-inline vk_ptr VkImageBindMemory(VkDevice Device, vk_linear_arena* Arena, VkImage Image, VkMemoryRequirements Requirements)
-{
-    vk_ptr Result = VkPushSize(Arena, Requirements.size, Requirements.alignment);
-    VkCheckResult(vkBindImageMemory(Device, Image, Result.Memory, Result.Offset));
-
-    return Result;
-}
-
 inline VkImage VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
                              VkSampleCountFlagBits SampleCount = VK_SAMPLE_COUNT_1_BIT)
 {
@@ -287,6 +368,10 @@ inline vk_image VkImageCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width
 
     return Result;
 }
+
+//
+// NOTE: Cube Map Helpers
+//
 
 inline VkImage VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Width, u32 Height, VkFormat Format, VkImageUsageFlags Usage,
                                u32 MipLevels)
@@ -326,12 +411,6 @@ inline vk_image VkCubeMapCreate(VkDevice Device, vk_linear_arena* Arena, u32 Wid
     Result.View = VkImageViewCreate(Device, Result.Image, VK_IMAGE_VIEW_TYPE_CUBE, Format, AspectMask, 0, 6);
 
     return Result;
-}
-
-inline void VkImageDestroy(VkDevice Device, vk_image Image)
-{
-    vkDestroyImageView(Device, Image.View, 0);
-    vkDestroyImage(Device, Image.Image, 0);
 }
 
 //

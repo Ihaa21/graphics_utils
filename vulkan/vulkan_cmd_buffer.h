@@ -37,8 +37,10 @@ struct vk_image_transfer
     VkImage Image;
     u32 OffsetX;
     u32 OffsetY;
+    u32 OffsetZ;
     u32 Width;
     u32 Height;
+    u32 Depth;
     
     barrier_mask InputMask;
     VkImageLayout InputLayout;

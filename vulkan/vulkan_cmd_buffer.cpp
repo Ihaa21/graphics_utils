@@ -101,8 +101,8 @@ inline void VkBarrierMemoryAdd(vk_commands* Commands, VkAccessFlags InputAccessM
     Commands->DstStageFlags |= OutputStageMask;
 }
 
-inline void VkBarrierBufferAdd(vk_commands* Commands, VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask,
-                               VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask, VkBuffer Buffer)
+inline void VkBarrierBufferAdd(vk_commands* Commands, VkBuffer Buffer, VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask,
+                               VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask)
 {
     VkBufferMemoryBarrier* Barrier = PushStruct(&Commands->BufferBarrierArena, VkBufferMemoryBarrier);
     Commands->NumBufferBarriers += 1;
@@ -122,12 +122,12 @@ inline void VkBarrierBufferAdd(vk_commands* Commands, VkAccessFlags InputAccessM
 
 inline void VkBarrierBufferAdd(vk_commands* Commands, barrier_mask InputMask, barrier_mask OutputMask, VkBuffer Buffer)
 {
-    VkBarrierBufferAdd(Commands, InputMask.AccessMask, InputMask.StageMask, OutputMask.AccessMask, OutputMask.StageMask, Buffer);
+    VkBarrierBufferAdd(Commands, Buffer, InputMask.AccessMask, InputMask.StageMask, OutputMask.AccessMask, OutputMask.StageMask);
 }
 
-inline void VkBarrierImageAdd(vk_commands* Commands, VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask,
-                              VkImageLayout InputLayout, VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask,
-                              VkImageLayout OutputLayout, VkImageAspectFlags AspectFlags, VkImage Image)
+inline void VkBarrierImageAdd(vk_commands* Commands, VkImage Image, VkImageAspectFlags AspectFlags,
+                              VkAccessFlags InputAccessMask, VkPipelineStageFlags InputStageMask, VkImageLayout InputLayout,
+                              VkAccessFlags OutputAccessMask, VkPipelineStageFlags OutputStageMask, VkImageLayout OutputLayout)
 {
     VkImageMemoryBarrier* Barrier = PushStruct(&Commands->ImageBarrierArena, VkImageMemoryBarrier);
     Commands->NumImageBarriers += 1;
@@ -150,12 +150,11 @@ inline void VkBarrierImageAdd(vk_commands* Commands, VkAccessFlags InputAccessMa
     Commands->DstStageFlags |= OutputStageMask;
 }
 
-inline void VkBarrierImageAdd(vk_commands* Commands, barrier_mask InputMask, VkImageLayout InputLayout, barrier_mask OutputMask,
-                              VkImageLayout OutputLayout, VkImageAspectFlags AspectFlags,
-                              VkImage Image)
+inline void VkBarrierImageAdd(vk_commands* Commands, VkImage Image, VkImageAspectFlags AspectFlags, barrier_mask InputMask,
+                              VkImageLayout InputLayout, barrier_mask OutputMask, VkImageLayout OutputLayout)
 {
-    VkBarrierImageAdd(Commands, InputMask.AccessMask, InputMask.StageMask, InputLayout, OutputMask.AccessMask, OutputMask.StageMask,
-                      OutputLayout, AspectFlags, Image);
+    VkBarrierImageAdd(Commands, Image, AspectFlags, InputMask.AccessMask, InputMask.StageMask, InputLayout, OutputMask.AccessMask,
+                      OutputMask.StageMask, OutputLayout);
 }
 
 inline void VkCommandsBarrierFlush(vk_commands* Commands)
@@ -255,13 +254,13 @@ inline u8* VkCommandsPushWrite(vk_commands* Commands, VkBuffer Buffer, u64 Write
     return Result;
 }
 
-inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 OffsetX, u32 OffsetY, u32 Width, u32 Height,
-                                   mm TexelSize, VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
-                                   barrier_mask InputMask, barrier_mask OutputMask)
+inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 OffsetX, u32 OffsetY, u32 OffsetZ, u32 Width, u32 Height,
+                                    u32 Depth, mm TexelSize, VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout,
+                                    VkImageLayout OutputLayout, barrier_mask InputMask, barrier_mask OutputMask)
 {
     u8* Result = 0;
     // TODO: If we can get the size of a format, we wouldn't need texelsize anymore
-    u64 ImageSize = Width * Height * TexelSize;
+    u64 ImageSize = Width * Height * Depth * TexelSize;
     vk_staging_ptr StagingPtr = VkStagingPushSize(&Commands->StagingArena, ImageSize, TexelSize);
     vk_image_transfer* Transfer = PushStruct(&Commands->ImageTransferArena, vk_image_transfer);
 
@@ -272,8 +271,10 @@ inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 Of
     Transfer->Image = Image;
     Transfer->OffsetX = OffsetX;
     Transfer->OffsetY = OffsetY;
+    Transfer->OffsetZ = OffsetZ;
     Transfer->Width = Width;
     Transfer->Height = Height;
+    Transfer->Depth = Depth;
     Transfer->AspectMask = AspectMask;
     Transfer->InputMask = InputMask;
     Transfer->InputLayout = InputLayout;
@@ -283,12 +284,30 @@ inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 Of
     return Result;
 }
 
-inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 Width, u32 Height, mm TexelSize, 
+inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 Width, u32 Height, u32 Depth, mm TexelSize, 
                                    VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
                                    barrier_mask InputMask, barrier_mask OutputMask)
 {
+    u8* Result = VkCommandsPushWriteImage(Commands, Image, 0, 0, 0, Width, Height, Depth, TexelSize, AspectMask, InputLayout, OutputLayout,
+                                          InputMask, OutputMask);
+    return Result;
+}
+
+inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 OffsetX, u32 OffsetY, u32 Width, u32 Height,
+                                    mm TexelSize, VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
+                                    barrier_mask InputMask, barrier_mask OutputMask)
+{
+    u8* Result = VkCommandsPushWriteImage(Commands, Image, OffsetX, OffsetY, 0, Width, Height, 1, TexelSize, AspectMask, InputLayout,
+                                          OutputLayout, InputMask, OutputMask);
+    return Result;
+}
+
+inline u8* VkCommandsPushWriteImage(vk_commands* Commands, VkImage Image, u32 Width, u32 Height, mm TexelSize, 
+                                    VkImageAspectFlagBits AspectMask, VkImageLayout InputLayout, VkImageLayout OutputLayout,
+                                    barrier_mask InputMask, barrier_mask OutputMask)
+{
     u8* Result = VkCommandsPushWriteImage(Commands, Image, 0, 0, Width, Height, TexelSize, AspectMask, InputLayout, OutputLayout,
-                                         InputMask, OutputMask);
+                                          InputMask, OutputMask);
     return Result;
 }
 
@@ -396,8 +415,8 @@ inline void VkCommandsTransferFlush(vk_commands* Commands, VkDevice Device)
                 for (u32 SubImageId = 0; SubImageId < NumTransfersInBlock; ++SubImageId)
                 {
                     vk_image_transfer* ImageTransfer = BlockGetData(CurrBlock, vk_image_transfer) + SubImageId;
-                    VkBarrierImageAdd(Commands, ImageTransfer->InputMask, ImageTransfer->InputLayout, IntermediateMask,
-                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->AspectMask, ImageTransfer->Image);
+                    VkBarrierImageAdd(Commands, ImageTransfer->Image, ImageTransfer->AspectMask, ImageTransfer->InputMask,
+                                      ImageTransfer->InputLayout, IntermediateMask, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
                 }
                 
                 ImageId += NumTransfersInBlock;
@@ -428,10 +447,10 @@ inline void VkCommandsTransferFlush(vk_commands* Commands, VkDevice Device)
                     ImageCopy.imageSubresource.layerCount = 1;
                     ImageCopy.imageOffset.x = ImageTransfer->OffsetX;
                     ImageCopy.imageOffset.y = ImageTransfer->OffsetY;
-                    ImageCopy.imageOffset.z = 0;
+                    ImageCopy.imageOffset.z = ImageTransfer->OffsetZ;
                     ImageCopy.imageExtent.width = ImageTransfer->Width;
                     ImageCopy.imageExtent.height = ImageTransfer->Height;
-                    ImageCopy.imageExtent.depth = 1;
+                    ImageCopy.imageExtent.depth = ImageTransfer->Depth;
                     vkCmdCopyBufferToImage(Commands->Buffer, ImageTransfer->StagingBuffer, ImageTransfer->Image,
                                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ImageCopy);
                 }
@@ -451,8 +470,8 @@ inline void VkCommandsTransferFlush(vk_commands* Commands, VkDevice Device)
                 for (u32 SubImageId = 0; SubImageId < NumTransfersInBlock; ++SubImageId)
                 {
                     vk_image_transfer* ImageTransfer = BlockGetData(CurrBlock, vk_image_transfer) + SubImageId;
-                    VkBarrierImageAdd(Commands, IntermediateMask, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->OutputMask,
-                                      ImageTransfer->OutputLayout, ImageTransfer->AspectMask, ImageTransfer->Image);
+                    VkBarrierImageAdd(Commands, ImageTransfer->Image, ImageTransfer->AspectMask, IntermediateMask,
+                                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ImageTransfer->OutputMask, ImageTransfer->OutputLayout);
                 }
                 
                 ImageId += NumTransfersInBlock;
