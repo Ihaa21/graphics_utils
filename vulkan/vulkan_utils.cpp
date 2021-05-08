@@ -839,11 +839,11 @@ inline VkRenderPass VkRenderPassBuilderEnd(vk_render_pass_builder* Builder, VkDe
 // NOTE: Compute Shader Helpers
 //
 
-inline void VkComputeDispatch(vk_commands Commands, vk_pipeline* Pipeline, VkDescriptorSet* DescriptorSets, u32 NumDescriptorSets, u32 DispatchX,
+inline void VkComputeDispatch(vk_commands* Commands, vk_pipeline* Pipeline, VkDescriptorSet* DescriptorSets, u32 NumDescriptorSets, u32 DispatchX,
                               u32 DispatchY, u32 DispatchZ)
 {
-    vkCmdBindPipeline(Commands.Buffer, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline->Handle);
-    vkCmdBindDescriptorSets(Commands.Buffer, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline->Layout, 0,
+    vkCmdBindPipeline(Commands->Buffer, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline->Handle);
+    vkCmdBindDescriptorSets(Commands->Buffer, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline->Layout, 0,
                             NumDescriptorSets, DescriptorSets, 0, 0);
-    vkCmdDispatch(Commands.Buffer, DispatchX, DispatchY, DispatchZ);
+    vkCmdDispatch(Commands->Buffer, DispatchX, DispatchY, DispatchZ);
 }
