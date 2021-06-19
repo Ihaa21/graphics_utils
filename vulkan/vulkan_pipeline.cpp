@@ -535,6 +535,11 @@ inline void VkPipelineRasterizationStateSet(vk_pipeline_builder* Builder, VkBool
     Builder->RasterizationState.frontFace = FrontFace;
 }
 
+inline void VkPipelineRasterizationSetLineWidth(vk_pipeline_builder* Builder, f32 LineWidth)
+{
+    Builder->RasterizationState.lineWidth = LineWidth;
+}
+
 inline void VkPipelineConservativeStateSet(vk_pipeline_builder* Builder, f32 PixelsIncrease)
 {
 #if 0
